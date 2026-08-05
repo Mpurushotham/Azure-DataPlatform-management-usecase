@@ -1,0 +1,104 @@
+# =============================================================================
+# Trivy IaC exceptions
+# =============================================================================
+# Every entry states what is suppressed, why it is acceptable here, and what
+# would make it unacceptable. An ignore file without those three things becomes
+# the place findings go to be forgotten.
+#
+# Entries carry an expiry date. A suppression with no expiry is a permanent
+# exception nobody ever revisits — the expiry forces the conversation again.
+#
+# `paths` are relative to the SCAN ROOT, not the repository root. The scan runs
+# as `trivy config terraform/`, so a finding in
+# terraform/modules/aks-platform/main.tf is reported as
+# modules/aks-platform/main.tf. Getting this wrong is silent: the entry parses,
+# matches nothing, and the finding still fails the build.
+# =============================================================================
+
+misconfigurations:
+  # ── Storage: public network access ────────────────────────────────────────
+  - id: AVD-AZU-0011
+    paths:
+      - "modules/data-lake/main.tf"
+    statement: |
+      Storage account permits public network access in sandbox.
+
+      Acceptable because default_action is Deny: the account is unreachable
+      except from the declared subnets and the operator address, even with a
+      valid Entra token. Shared keys are disabled entirely, so there is no
+      credential that could be used from elsewhere.
+
+      Unacceptable if: this appears in prod, where
+      public_network_access_enabled = false and private endpoints are used.
+    expiry: "2027-02-15"
+
+  # ── AKS: API server exposed ───────────────────────────────────────────────
+  - id: AVD-AZU-0040
+    paths:
+      - "modules/aks-platform/main.tf"
+    statement: |
+      AKS API server is not private.
+
+      Acceptable because access is restricted to the operator address by
+      authorized_ip_ranges, local accounts are disabled, and Entra RBAC is the
+      only authentication path. A private API server needs either a VPN or
+      self-hosted runners in the VNet, neither of which this environment funds.
+
+      Unacceptable if: the IP allowlist is emptied, or this reaches an
+      environment holding production data.
+    expiry: "2027-02-15"
+
+  # ── Container registry: not Premium ───────────────────────────────────────
+  - id: AVD-AZU-0042
+    paths:
+      - "modules/platform-services/main.tf"
+    statement: |
+      ACR has no network rules and no content trust.
+
+      Both are Premium-tier features, roughly EUR 45/month more than Basic.
+      Acceptable because the admin user is disabled, pushes use a federated
+      identity and pulls use the kubelet managed identity — so authentication
+      is the control that remains, and it is a strong one.
+
+      Unacceptable if: the registry starts holding images for anything outside
+      this platform, at which point Premium and signing are warranted.
+    expiry: "2027-02-15"
+
+  # ── Key Vault: purge protection off ───────────────────────────────────────
+  - id: AVD-AZU-0016
+    paths:
+      - "modules/platform-services/main.tf"
+    statement: |
+      Key Vault purge protection is disabled in sandbox.
+
+      Deliberate and not merely tolerated: once enabled it cannot be disabled,
+      and a purge-protected vault holds its name for 90 days after deletion. An
+      environment designed to be destroyed and recreated would run out of names.
+      Soft delete is on at the 7-day minimum.
+
+      Unacceptable if: this environment starts holding a secret that is not
+      reproducible, or in prod, where enable_purge_protection is true.
+    expiry: "2027-02-15"
+
+  # ── AKS: API server authorized IP ranges ──────────────────────────────────
+  - id: AVD-AZU-0041
+    paths:
+      - "modules/aks-platform/main.tf"
+    statement: |
+      Trivy cannot see that authorized_ip_ranges is set.
+
+      The control is present — api_server_access_profile.authorized_ip_ranges
+      is wired to var.api_server_authorized_ip_ranges, and both environment
+      roots pass the operator range. Trivy evaluates the module statically, so
+      a value arriving through a variable is invisible to it and it reports the
+      control as absent.
+
+      Rather than suppress this and move on, the variable was made *required*
+      with a validation rejecting an empty list — so the module can no longer be
+      instantiated without an allowlist. That is a stronger guarantee than the
+      one Trivy was looking for, and it fails at plan time rather than at scan
+      time.
+
+      Unacceptable if: the validation block is removed, or the module gains a
+      code path that sets the ranges conditionally.
+    expiry: "2027-02-15"

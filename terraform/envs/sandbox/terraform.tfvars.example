@@ -1,0 +1,28 @@
+# Copy to terraform.tfvars, or generate it with `make tfvars ENV=sandbox`.
+# The real file is gitignored: it carries subscription identifiers and the
+# operator's source address.
+
+subscription_id = "00000000-0000-0000-0000-000000000000"
+tenant_id       = "00000000-0000-0000-0000-000000000000"
+unique_suffix   = "yoda6b1f"
+
+# Default-deny ACLs on storage, Key Vault and the AKS API server allow only
+# these addresses. `make tfvars` fills this from the current public IP.
+operator_ip_ranges = ["203.0.113.10/32"]
+
+# Append-only. The network module allocates Databricks subnets by list index,
+# so reordering renumbers existing workspaces.
+domains = ["logistics"]
+
+budget_alert_emails = ["platform-team@example.com"]
+monthly_budget      = 50
+budget_start_date   = "2026-08-01T00:00:00Z"
+
+# Object IDs seeded as owners of the platform admin group and granted
+# cluster-admin on AKS. Find yours with:
+#   az ad signed-in-user show --query id -o tsv
+platform_admin_object_ids = []
+
+# The only component that consumes vCPU quota. Set false to run the data
+# platform with no compute at all.
+enable_aks = true

@@ -1,0 +1,14 @@
+# Providers the DAGs import. Kept minimal — every package here is a package
+# that has to be patched when it has a CVE, and the image is rebuilt and
+# rescanned on every one.
+
+# Triggers and monitors Databricks jobs. The whole reason for a custom image.
+apache-airflow-providers-databricks
+
+# ADLS Gen2 arrival checks and the Azure resource calls the DAGs make.
+apache-airflow-providers-microsoft-azure
+
+# Workload identity federation. The Azure providers accept a credential object,
+# and this is what turns the projected service-account token into one — which
+# is what removes the need for any stored Azure credential in the cluster.
+azure-identity

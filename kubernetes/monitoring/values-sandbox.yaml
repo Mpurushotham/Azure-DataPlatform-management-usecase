@@ -1,0 +1,157 @@
+# =============================================================================
+# kube-prometheus-stack — Grafana OSS in place of Azure Managed Grafana
+# =============================================================================
+# Azure Managed Grafana is about EUR 45/month. On a platform whose entire
+# budget is EUR 50, that is the whole budget for one dashboard server. Grafana
+# OSS in-cluster costs the memory it occupies.
+#
+# What is given up, stated plainly rather than glossed:
+#
+#   Entra SSO out of the box     replaced by port-forward and an admin password
+#   Managed availability         a node restart takes dashboards down
+#   Zone redundancy              none
+#
+# All three are acceptable for a platform whose dashboard consumers are the
+# team that operates it. None would be acceptable for dashboards a business
+# unit depends on, and that is the trigger to revisit — see ADR-011.
+#
+# Retention is 7 days. Long-horizon trends belong in Log Analytics or in a gold
+# table, not in a Prometheus TSDB on a burstable node.
+# =============================================================================
+
+fullnameOverride: kps
+
+prometheus:
+  prometheusSpec:
+    retention: 7d
+    retentionSize: 4GB
+
+    # Scrape everything labelled for it, in any namespace, without needing a
+    # helm release label. The alternative — selectors keyed on release — is the
+    # single most common reason a freshly-installed ServiceMonitor is silently
+    # ignored.
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+
+    resources:
+      requests:
+        cpu: 100m
+        memory: 512Mi
+      limits:
+        memory: 1Gi
+
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: managed-csi
+          accessModes: ["ReadWriteOnce"]
+          resources:
+            requests:
+              storage: 8Gi
+
+    securityContext:
+      runAsNonRoot: true
+      runAsUser: 65534
+      fsGroup: 65534
+
+alertmanager:
+  # Off. Azure Monitor action groups already route the alerts that matter, and
+  # a second alerting path means two places to look and two to keep in sync.
+  # Prometheus rules here drive dashboards; Azure Monitor drives pages.
+  enabled: false
+
+grafana:
+  enabled: true
+
+  # Password comes from a Kubernetes secret created by the deploy script, not
+  # from values. A password in a values file is a password in git.
+  admin:
+    existingSecret: grafana-admin
+    userKey: admin-user
+    passwordKey: admin-password
+
+  persistence:
+    enabled: true
+    storageClassName: managed-csi
+    size: 2Gi
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 256Mi
+
+  service:
+    type: ClusterIP
+
+  # Dashboards as code. A dashboard edited in the UI is lost on the next pod
+  # restart, and that is deliberate: the sidecar reloads from ConfigMaps, so
+  # the repository is the only durable source.
+  sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      searchNamespace: ALL
+      folderAnnotation: grafana_folder
+      provider:
+        foldersFromFilesStructure: true
+    datasources:
+      enabled: true
+      label: grafana_datasource
+      searchNamespace: ALL
+
+  grafana.ini:
+    analytics:
+      reporting_enabled: false
+      check_for_updates: false
+    users:
+      allow_sign_up: false
+    auth.anonymous:
+      enabled: false
+
+# ── Components disabled on a single-node cluster ─────────────────────────────
+# Each of these scrapes a control-plane endpoint that AKS does not expose to
+# the customer. Left enabled they produce permanently-firing targets, which
+# trains everyone to ignore a red target list.
+kubeApiServer:
+  enabled: true
+kubeControllerManager:
+  enabled: false
+kubeScheduler:
+  enabled: false
+kubeProxy:
+  enabled: false
+kubeEtcd:
+  enabled: false
+
+nodeExporter:
+  enabled: true
+
+prometheus-node-exporter:
+  resources:
+    requests:
+      cpu: 25m
+      memory: 32Mi
+    limits:
+      memory: 64Mi
+
+kubeStateMetrics:
+  enabled: true
+
+kube-state-metrics:
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      memory: 128Mi
+
+prometheusOperator:
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 256Mi

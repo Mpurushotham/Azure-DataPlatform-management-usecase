@@ -1,0 +1,31 @@
+# Installs Terraform from a checksum-verified release asset.
+#
+# The marketplace TerraformInstaller task would be shorter, and is not used: it
+# needs an org admin to install an extension, which makes this pipeline
+# unrunnable in a fresh Azure DevOps organisation. Twelve lines is a fair price
+# for a pipeline that works on first commit.
+#
+# The checksum is verified rather than trusted. An unverified download in a
+# pipeline that then holds an Owner-scoped federated credential is a supply
+# chain the whole platform depends on.
+
+parameters:
+  - name: version
+    type: string
+
+steps:
+  - script: |
+      set -euo pipefail
+      VERSION="${{ parameters.version }}"
+      BASE="https://releases.hashicorp.com/terraform/${VERSION}"
+      ZIP="terraform_${VERSION}_linux_amd64.zip"
+
+      curl -fsSLO "${BASE}/${ZIP}"
+      curl -fsSLO "${BASE}/terraform_${VERSION}_SHA256SUMS"
+
+      grep " ${ZIP}\$" "terraform_${VERSION}_SHA256SUMS" | sha256sum -c -
+
+      sudo unzip -o "${ZIP}" -d /usr/local/bin
+      rm -f "${ZIP}" "terraform_${VERSION}_SHA256SUMS"
+      terraform version
+    displayName: Install Terraform ${{ parameters.version }}

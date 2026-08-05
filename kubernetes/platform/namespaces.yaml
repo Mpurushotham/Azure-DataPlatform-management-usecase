@@ -1,0 +1,146 @@
+# =============================================================================
+# Namespaces and the default-deny baseline
+# =============================================================================
+# Pod Security Admission is set to `restricted` in enforce mode on both
+# workload namespaces. That blocks privileged pods, host networking, host
+# paths and privilege escalation at admission time — before the pod exists,
+# rather than after a NetworkPolicy has to contain it.
+#
+# `monitoring` runs at `privileged` because node-exporter genuinely needs
+# hostPID and host mounts to read node metrics. Narrowing that exception to the
+# one namespace that needs it is the point of setting the level per namespace.
+# =============================================================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: airflow
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted
+    platform: yoda
+    component: orchestration
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+  labels:
+    # node-exporter requires host access. Scoped here and nowhere else.
+    pod-security.kubernetes.io/enforce: privileged
+    pod-security.kubernetes.io/audit: baseline
+    pod-security.kubernetes.io/warn: baseline
+    platform: yoda
+    component: observability
+---
+# ── Default deny, both directions ────────────────────────────────────────────
+# Everything below this is an explicit exception. Cilium enforces these in
+# eBPF, so there is no sidecar and no per-pod CPU cost.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny
+  namespace: airflow
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+# DNS is the exception every other policy depends on. Without it a pod cannot
+# resolve anything, and every subsequent egress rule written against a
+# hostname silently fails.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns
+  namespace: airflow
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+---
+# Airflow's internal mesh: scheduler to Postgres, webserver to Postgres,
+# task pods to the scheduler.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-airflow-internal
+  namespace: airflow
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - podSelector: {}
+  egress:
+    - to:
+        - podSelector: {}
+---
+# Egress to the internet on 443 only. This is what lets Airflow reach the
+# Databricks REST API, Entra for token exchange, ADLS, and git-sync — without
+# opening arbitrary ports outbound from a namespace that runs user-authored
+# DAG code.
+#
+# The RFC1918 exclusions matter: without them this rule would also permit
+# traffic to every other pod and node in the cluster, quietly undoing the
+# default-deny above.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-https-egress
+  namespace: airflow
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 10.0.0.0/8
+              - 172.16.0.0/12
+              - 192.168.0.0/16
+      ports:
+        - protocol: TCP
+          port: 443
+---
+# Prometheus scrapes Airflow's statsd exporter and the webserver metrics
+# endpoint. Without this the default-deny above makes every Airflow target
+# appear down.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-prometheus-scrape
+  namespace: airflow
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: monitoring
+      ports:
+        - protocol: TCP
+          port: 9102
+        - protocol: TCP
+          port: 8080

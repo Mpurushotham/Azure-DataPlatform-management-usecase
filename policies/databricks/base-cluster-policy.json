@@ -1,0 +1,52 @@
+{
+  "_comment": [
+    "Static security controls applied to every Databricks cluster policy.",
+    "",
+    "This file is the source of truth for the settings that must not vary by",
+    "domain or environment. terraform/modules/databricks-compute merges it with",
+    "the dynamic parts — cost-attribution tags, the node-type allowlist and the",
+    "autotermination ceiling — which do vary.",
+    "",
+    "Kept as JSON rather than HCL so it can be reviewed and tested without",
+    "Terraform: scripts/python/validate_policies.py asserts that every control",
+    "below is still present and still fixed, which is a check that runs in CI on",
+    "every pull request."
+  ],
+
+  "data_security_mode": {
+    "type": "fixed",
+    "value": "USER_ISOLATION",
+    "_why": "Unity Catalog row filters and column masks only apply in this access mode. A cluster in a weaker mode reads the underlying files and bypasses them entirely."
+  },
+
+  "spark_version": {
+    "type": "regex",
+    "pattern": "^15\\.4\\..*",
+    "defaultValue": "15.4.x-scala2.12",
+    "_why": "An LTS runtime. A platform that tracks the newest runtime spends its time debugging the newest runtime."
+  },
+
+  "runtime_engine": {
+    "type": "unlimited",
+    "defaultValue": "PHOTON",
+    "_why": "Usually cheaper per query despite the higher DBU rate, because it finishes sooner. Left unlocked rather than fixed — it is a loss on small non-vectorisable jobs."
+  },
+
+  "azure_attributes.first_on_demand": {
+    "type": "fixed",
+    "value": 1,
+    "_why": "The driver stays on-demand. An evicted driver fails the whole run and loses every completed task; an evicted worker loses one task."
+  },
+
+  "cluster_log_conf.path": {
+    "type": "fixed",
+    "value": "dbfs:/cluster-logs",
+    "_why": "Cluster logs must land somewhere durable, or a failed job's stderr dies with the cluster."
+  },
+
+  "enable_local_disk_encryption": {
+    "type": "fixed",
+    "value": true,
+    "_why": "Encrypts the temporary local storage Spark spills shuffle data to. That spill contains real customer data."
+  }
+}

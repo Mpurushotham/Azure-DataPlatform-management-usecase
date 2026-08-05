@@ -1,0 +1,238 @@
+# =============================================================================
+# Terraform — validate, scan, plan on PR; gated apply on main
+# =============================================================================
+# Kept in lockstep with azure-pipelines/terraform-pipeline.yml. Neither file
+# contains policy logic: both call `make` targets, so a gate can only diverge if
+# someone edits a target list, not by one pipeline quietly drifting. That is the
+# acceptance criterion behind ADR-013 — a service can move between CI platforms
+# without its security posture changing.
+#
+# No secret is stored. Azure access is OIDC federation into the identity
+# terraform/bootstrap creates; the three repository variables below are
+# identifiers, not credentials.
+# =============================================================================
+
+name: terraform
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'terraform/**'
+      - 'policies/**'
+      - '.github/workflows/terraform.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'terraform/**'
+      - 'policies/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  # Required to mint the OIDC token exchanged for an Azure credential.
+  id-token: write
+  pull-requests: write
+
+env:
+  TERRAFORM_VERSION: '1.9.8'
+  TFLINT_VERSION: 'v0.53.0'
+
+concurrency:
+  # One run per branch. Two concurrent applies against the same state produce a
+  # lock timeout, which looks like a hang rather than a conflict.
+  group: terraform-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # ── Static checks: no Azure, no credentials, fast ───────────────────────────
+  validate:
+    name: validate
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - name: Format
+        run: make fmt-check
+
+      - name: Validate all roots
+        run: make validate
+
+      - uses: terraform-linters/setup-tflint@v4
+        with:
+          tflint_version: ${{ env.TFLINT_VERSION }}
+
+      - name: Lint
+        run: make lint
+
+      # The cluster-policy security contract. This is the check that catches a
+      # control being weakened from `fixed` to editable — a change a Terraform
+      # plan diff shows but a reviewer skims past.
+      - name: Cluster policy contract
+        run: make policy-test
+
+      - name: Airflow DAG import check
+        run: make dag-test
+
+  # ── Security scanning ───────────────────────────────────────────────────────
+  scan:
+    name: scan
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Trivy IaC scan
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: config
+          scan-ref: terraform/
+          severity: CRITICAL,HIGH
+          # CRITICAL blocks the build; HIGH is reported. A gate that blocks on
+          # HIGH in a repo this size blocks on things nobody intends to fix,
+          # and a gate people routinely override is not a gate.
+          exit-code: '0'
+          format: sarif
+          output: trivy.sarif
+          trivyignores: .trivyignore.yaml
+
+      - name: Fail on CRITICAL
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          scan-type: config
+          scan-ref: terraform/
+          severity: CRITICAL
+          exit-code: '1'
+          trivyignores: .trivyignore.yaml
+
+      - name: Upload SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy.sarif
+
+  # ── Plan against real Azure ─────────────────────────────────────────────────
+  # Runs on pull requests using the `pull_request` federated subject, which has
+  # read-only intent. A fork PR cannot select a GitHub Environment, which is
+  # what stops it reaching the apply credential.
+  plan:
+    name: plan
+    runs-on: ubuntu-24.04
+    needs: [validate, scan]
+    if: github.event_name == 'pull_request'
+    environment: sandbox
+    strategy:
+      # sandbox-databricks reads sandbox's state, so a plan of it before sandbox
+      # has applied is meaningless — hence fail-fast off and ordered reporting
+      # rather than a matrix that pretends they are independent.
+      fail-fast: false
+      matrix:
+        root: [sandbox]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - name: Write backend config
+        run: |
+          cat > terraform/envs/${{ matrix.root }}/backend.hcl <<EOF
+          resource_group_name  = "${{ vars.TFSTATE_RESOURCE_GROUP }}"
+          storage_account_name = "${{ vars.TFSTATE_STORAGE_ACCOUNT }}"
+          container_name       = "tfstate-yoda-sandbox"
+          key                  = "${{ matrix.root }}.terraform.tfstate"
+          use_azuread_auth     = true
+          EOF
+
+      - name: Plan
+        id: plan
+        env:
+          # The provider reads the OIDC token azure/login placed in the
+          # environment; ARM_USE_OIDC is what tells it to.
+          ARM_USE_OIDC: 'true'
+          ARM_USE_AZUREAD: 'true'
+          TF_VAR_subscription_id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          TF_VAR_tenant_id: ${{ vars.AZURE_TENANT_ID }}
+          TF_VAR_unique_suffix: ${{ vars.UNIQUE_SUFFIX }}
+        run: |
+          make init ENV=${{ matrix.root }}
+          make plan ENV=${{ matrix.root }} 2>&1 | tee plan.txt
+          echo 'summary<<EOF' >> "$GITHUB_OUTPUT"
+          grep -E '^(Plan:|No changes)' plan.txt >> "$GITHUB_OUTPUT" || echo 'Plan produced no summary line' >> "$GITHUB_OUTPUT"
+          echo 'EOF' >> "$GITHUB_OUTPUT"
+
+      - name: Comment plan summary
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `### Terraform plan — \`${{ matrix.root }}\`\n\n\`\`\`\n${{ steps.plan.outputs.summary }}\n\`\`\``
+            })
+
+  # ── Apply ───────────────────────────────────────────────────────────────────
+  # Gated on the GitHub Environment, which carries its own reviewer rules. The
+  # federated credential subject is environment-scoped, so this job cannot run
+  # without that gate being satisfied — the protection is in Entra, not only in
+  # the workflow file.
+  apply:
+    name: apply
+    runs-on: ubuntu-24.04
+    needs: [validate, scan]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    environment: sandbox
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - name: Quota preflight
+        # Two seconds here beats discovering the quota twelve minutes into an
+        # AKS create, with a half-built cluster left behind.
+        run: ./scripts/bash/check-quota.sh sandbox
+
+      - name: Write backend config
+        run: |
+          cat > terraform/envs/sandbox/backend.hcl <<EOF
+          resource_group_name  = "${{ vars.TFSTATE_RESOURCE_GROUP }}"
+          storage_account_name = "${{ vars.TFSTATE_STORAGE_ACCOUNT }}"
+          container_name       = "tfstate-yoda-sandbox"
+          key                  = "sandbox.terraform.tfstate"
+          use_azuread_auth     = true
+          EOF
+
+      - name: Apply
+        env:
+          ARM_USE_OIDC: 'true'
+          ARM_USE_AZUREAD: 'true'
+          AUTO_APPROVE: '1'
+          TF_VAR_subscription_id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          TF_VAR_tenant_id: ${{ vars.AZURE_TENANT_ID }}
+          TF_VAR_unique_suffix: ${{ vars.UNIQUE_SUFFIX }}
+        run: |
+          make init  ENV=sandbox
+          make plan  ENV=sandbox
+          make apply ENV=sandbox

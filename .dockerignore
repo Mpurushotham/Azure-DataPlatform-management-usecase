@@ -1,0 +1,47 @@
+# =============================================================================
+# Docker build context
+# =============================================================================
+# The context is the repository root, because the Airflow image copies dags/
+# and docker/airflow/requirements.txt from different places in the tree.
+#
+# Without this file the context is ~2.9 GB, almost all of it Terraform provider
+# binaries under .terraform/. Both build paths tar and upload the whole context
+# before the first layer runs, so the effect is a build that appears to hang for
+# ten minutes and then transfers 2.9 GB. With this file the context is under a
+# megabyte.
+# =============================================================================
+
+# Terraform — provider binaries, state, plans
+**/.terraform/
+**/.terraform.lock.hcl
+**/*.tfstate
+**/*.tfstate.*
+**/tfplan
+**/backend.hcl
+**/*.tfvars
+
+# Version control
+.git/
+.github/
+.gitignore
+
+# Nothing below is needed to build or run Airflow
+docs/
+kubernetes/
+scripts/
+azure-pipelines/
+policies/
+terraform/
+Makefile
+README.md
+*.md
+
+# Python and OS noise
+**/__pycache__/
+**/*.py[cod]
+**/.venv/
+**/.pytest_cache/
+**/.ruff_cache/
+**/.DS_Store
+**/.idea/
+**/.vscode/

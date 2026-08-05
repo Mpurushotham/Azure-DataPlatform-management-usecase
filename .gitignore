@@ -1,0 +1,50 @@
+# Terraform
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan
+crash.log
+crash.*.log
+
+# Backend and variable files carry subscription/tenant identifiers and the
+# operator's source IP. The .example files in the repo show the shape.
+backend.hcl
+*.tfvars
+!*.tfvars.example
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+
+# Kubernetes / Helm
+kubeconfig
+*.kubeconfig
+charts/**/charts/
+*.tgz
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+
+# Rendered artefacts
+/tmp/rendered.yaml
+rendered.yaml
+*.rendered.json
+
+# Local reports produced by scripts/python/finops_report.py
+reports/*.json
+reports/*.csv
+!reports/.gitkeep
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp

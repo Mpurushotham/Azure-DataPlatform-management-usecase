@@ -1,0 +1,123 @@
+# =============================================================================
+# Airflow metadata database — our own StatefulSet, not the chart's subchart
+# =============================================================================
+# The Airflow chart bundles Bitnami's PostgreSQL subchart. It is disabled here
+# for two reasons, the second of which is the durable one:
+#
+#   1. Bitnami withdrew the pinned tag from Docker Hub, so the subchart's
+#      default image no longer resolves — `failed to resolve reference
+#      docker.io/bitnami/postgresql:16.1.0-debian-11-r15: not found`. A
+#      dependency that can disappear from under a pinned chart version is a
+#      dependency worth owning.
+#
+#   2. The subchart's pod spec does not satisfy Pod Security `restricted`, and
+#      overriding it means fighting a chart whose values do not expose every
+#      container.
+#
+# Forty lines of our own is cheaper than either. This runs the official
+# postgres image, sets a securityContext that passes `restricted`, and is
+# explicit about what it is.
+#
+# Not production. Production points at Azure Database for PostgreSQL Flexible
+# Server — see ADR-010.
+# =============================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: airflow-postgresql
+  namespace: airflow
+  labels:
+    app: airflow-postgresql
+spec:
+  # Headless: the StatefulSet gives one stable DNS name and there is exactly
+  # one replica. A ClusterIP would add a load balancer in front of a single pod.
+  clusterIP: None
+  selector:
+    app: airflow-postgresql
+  ports:
+    - name: postgresql
+      port: 5432
+      targetPort: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: airflow-postgresql
+  namespace: airflow
+  labels:
+    app: airflow-postgresql
+spec:
+  serviceName: airflow-postgresql
+  replicas: 1
+  selector:
+    matchLabels:
+      app: airflow-postgresql
+  template:
+    metadata:
+      labels:
+        app: airflow-postgresql
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        runAsGroup: 999
+        fsGroup: 999
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: POSTGRES_USER
+              value: airflow
+            - name: POSTGRES_DB
+              value: airflow
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: airflow-postgres
+                  key: password
+            # The official image refuses to initialise into a non-empty
+            # directory, and an Azure Disk arrives with lost+found in it.
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          ports:
+            - name: postgresql
+              containerPort: 5432
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "airflow", "-d", "airflow"]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "airflow", "-d", "airflow"]
+            # Generous on a burstable node that can run out of CPU credits.
+            # A liveness probe that kills a slow database makes it slower.
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            failureThreshold: 6
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: managed-csi
+        resources:
+          requests:
+            storage: 8Gi

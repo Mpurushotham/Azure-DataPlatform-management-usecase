@@ -1,0 +1,236 @@
+# =============================================================================
+# Azure DevOps — Terraform validate, scan, plan and apply
+# =============================================================================
+# Mirrors .github/workflows/terraform.yml. Rather than maintaining two divergent
+# implementations, both call the same `make` targets — so a gate can only
+# diverge if someone edits a target list, not by one pipeline quietly drifting
+# from the other. The acceptance criterion is that a service can move between
+# CI platforms without its security posture changing (ADR-013).
+#
+# Deliberately self-contained:
+#
+#   - No marketplace extensions. TerraformInstaller@1 is the obvious choice and
+#     is not used: it requires an org admin to install an extension, which makes
+#     the pipeline unrunnable in a fresh organisation. Terraform is installed
+#     from a checksum-verified release asset.
+#   - No required variable groups. Everything has a default, so the pipeline
+#     runs on first commit and the Azure-dependent stages skip cleanly until a
+#     service connection is configured.
+#
+# To enable plan and apply, set the pipeline variable `azureServiceConnection`
+# to the name of an ARM service connection using workload identity federation.
+# The federated credential is created by terraform/bootstrap when
+# azure_devops_organization is set.
+# =============================================================================
+
+name: terraform-$(Build.SourceBranchName)-$(Date:yyyyMMdd)$(Rev:.r)
+
+trigger:
+  branches:
+    include: [main]
+  paths:
+    include:
+      - terraform/*
+      - policies/*
+      - azure-pipelines/*
+
+pr:
+  branches:
+    include: [main]
+  paths:
+    include:
+      - terraform/*
+      - policies/*
+
+pool:
+  vmImage: ubuntu-24.04
+
+variables:
+  # Kept in lockstep with .github/workflows/terraform.yml.
+  TERRAFORM_VERSION: '1.9.8'
+  TFLINT_VERSION: 'v0.53.0'
+  # Empty until an ARM service connection exists. Azure stages check for it.
+  azureServiceConnection: ''
+
+stages:
+  # ── Static checks: no Azure, no credentials ────────────────────────────────
+  - stage: validate
+    displayName: Validate
+    jobs:
+      - job: static
+        displayName: fmt, lint, validate, policy, dags
+        steps:
+          - template: templates/install-terraform.yml
+            parameters:
+              version: $(TERRAFORM_VERSION)
+
+          - script: make fmt-check
+            displayName: Terraform format
+
+          - script: make validate
+            displayName: Terraform validate (all roots)
+
+          - script: |
+              set -euo pipefail
+              curl -fsSL https://raw.githubusercontent.com/terraform-linters/tflint/master/install_linux.sh \
+                | TFLINT_VERSION=$(TFLINT_VERSION) bash
+              make lint
+            displayName: tflint
+
+          # The cluster-policy security contract. Catches a control being
+          # weakened from `fixed` to editable — a change a plan diff shows but a
+          # reviewer skims past.
+          - script: make policy-test
+            displayName: Cluster policy contract
+
+          - script: make dag-test
+            displayName: Airflow DAG import check
+
+  # ── Security scanning ──────────────────────────────────────────────────────
+  - stage: scan
+    displayName: Scan
+    dependsOn: validate
+    jobs:
+      - job: trivy
+        displayName: Trivy IaC
+        steps:
+          - script: |
+              set -euo pipefail
+              curl -fsSL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+                | sh -s -- -b /usr/local/bin v0.58.1
+              trivy --version
+            displayName: Install Trivy
+
+          # Report HIGH, block on CRITICAL. A gate that blocks on HIGH in a repo
+          # this size blocks on things nobody intends to fix, and a gate people
+          # routinely override is not a gate.
+          - script: |
+              trivy config terraform/ \
+                --severity CRITICAL,HIGH \
+                --ignorefile .trivyignore.yaml \
+                --exit-code 0
+            displayName: Report HIGH and CRITICAL
+
+          - script: |
+              trivy config terraform/ \
+                --severity CRITICAL \
+                --ignorefile .trivyignore.yaml \
+                --exit-code 1
+            displayName: Fail on CRITICAL
+
+  # ── Plan on pull requests ──────────────────────────────────────────────────
+  - stage: plan
+    displayName: Plan
+    dependsOn: scan
+    condition: |
+      and(succeeded(),
+          eq(variables['Build.Reason'], 'PullRequest'),
+          ne(variables['azureServiceConnection'], ''))
+    jobs:
+      - job: plan_sandbox
+        displayName: Plan sandbox
+        steps:
+          - template: templates/install-terraform.yml
+            parameters:
+              version: $(TERRAFORM_VERSION)
+
+          - task: AzureCLI@2
+            displayName: terraform plan
+            inputs:
+              azureSubscription: $(azureServiceConnection)
+              scriptType: bash
+              scriptLocation: inlineScript
+              # Leaves the federated token in the environment so the azurerm
+              # provider can use it rather than a separate credential.
+              addSpnToEnvironment: true
+              inlineScript: |
+                set -euo pipefail
+                export ARM_USE_OIDC=true
+                export ARM_USE_AZUREAD=true
+                export ARM_CLIENT_ID="$servicePrincipalId"
+                export ARM_OIDC_TOKEN="$idToken"
+                export ARM_TENANT_ID="$tenantId"
+                export ARM_SUBSCRIPTION_ID="$(az account show --query id -o tsv)"
+
+                cat > terraform/envs/sandbox/backend.hcl <<EOF
+                resource_group_name  = "$(TFSTATE_RESOURCE_GROUP)"
+                storage_account_name = "$(TFSTATE_STORAGE_ACCOUNT)"
+                container_name       = "tfstate-yoda-sandbox"
+                key                  = "sandbox.terraform.tfstate"
+                use_azuread_auth     = true
+                EOF
+
+                export TF_VAR_subscription_id="$ARM_SUBSCRIPTION_ID"
+                export TF_VAR_tenant_id="$tenantId"
+                export TF_VAR_unique_suffix="$(UNIQUE_SUFFIX)"
+
+                make init ENV=sandbox
+                make plan ENV=sandbox
+
+  # ── Apply on main ──────────────────────────────────────────────────────────
+  # A deployment job against an ADO Environment, so the environment's own
+  # approval checks gate it — the same shape as the GitHub Environment gate.
+  - stage: apply
+    displayName: Apply
+    dependsOn: scan
+    condition: |
+      and(succeeded(),
+          eq(variables['Build.SourceBranch'], 'refs/heads/main'),
+          ne(variables['Build.Reason'], 'PullRequest'),
+          ne(variables['azureServiceConnection'], ''))
+    jobs:
+      - deployment: apply_sandbox
+        displayName: Apply sandbox
+        environment: yoda-sandbox
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+
+                - template: templates/install-terraform.yml
+                  parameters:
+                    version: $(TERRAFORM_VERSION)
+
+                - task: AzureCLI@2
+                  displayName: Quota preflight
+                  inputs:
+                    azureSubscription: $(azureServiceConnection)
+                    scriptType: bash
+                    scriptLocation: inlineScript
+                    # Two seconds here beats finding the quota twelve minutes
+                    # into an AKS create with a half-built cluster left behind.
+                    inlineScript: ./scripts/bash/check-quota.sh sandbox
+
+                - task: AzureCLI@2
+                  displayName: terraform apply
+                  inputs:
+                    azureSubscription: $(azureServiceConnection)
+                    scriptType: bash
+                    scriptLocation: inlineScript
+                    addSpnToEnvironment: true
+                    inlineScript: |
+                      set -euo pipefail
+                      export ARM_USE_OIDC=true
+                      export ARM_USE_AZUREAD=true
+                      export ARM_CLIENT_ID="$servicePrincipalId"
+                      export ARM_OIDC_TOKEN="$idToken"
+                      export ARM_TENANT_ID="$tenantId"
+                      export ARM_SUBSCRIPTION_ID="$(az account show --query id -o tsv)"
+
+                      cat > terraform/envs/sandbox/backend.hcl <<EOF
+                      resource_group_name  = "$(TFSTATE_RESOURCE_GROUP)"
+                      storage_account_name = "$(TFSTATE_STORAGE_ACCOUNT)"
+                      container_name       = "tfstate-yoda-sandbox"
+                      key                  = "sandbox.terraform.tfstate"
+                      use_azuread_auth     = true
+                      EOF
+
+                      export TF_VAR_subscription_id="$ARM_SUBSCRIPTION_ID"
+                      export TF_VAR_tenant_id="$tenantId"
+                      export TF_VAR_unique_suffix="$(UNIQUE_SUFFIX)"
+                      export AUTO_APPROVE=1
+
+                      make init  ENV=sandbox
+                      make plan  ENV=sandbox
+                      make apply ENV=sandbox

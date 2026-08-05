@@ -1,0 +1,256 @@
+# =============================================================================
+# Airflow — KubernetesExecutor on a 2 vCPU node
+# =============================================================================
+# Sizing here is not conservative for its own sake. The whole cluster is one
+# Standard_B2s_v2: 2 vCPU and 8 GB, shared with Prometheus, Grafana and the
+# system pods. Every request below is what the component actually needs at
+# idle, because the sum of requests is what the scheduler uses to decide
+# whether anything fits at all.
+#
+# Requests are set, limits mostly are not. A CPU limit throttles rather than
+# evicts, and a throttled scheduler misses heartbeats and marks healthy tasks
+# as zombies. Memory limits are set, because the failure mode there — a leak
+# taking the node down — is worse than a restart.
+# =============================================================================
+
+# Placeholders replaced by scripts/bash/deploy-platform.sh from Terraform
+# outputs. The image is pinned by digest at deploy time, never by tag.
+images:
+  airflow:
+    repository: ACR_LOGIN_SERVER/airflow
+    # Pinned by digest, not by tag. A tag is a mutable pointer: with
+    # pullPolicy IfNotPresent a node that already holds *some* image called
+    # :2.10.5 will never fetch the new one, and the deployment silently runs
+    # last week's code. A digest makes the reference immutable, so the kubelet
+    # pulls when — and only when — the content actually changed.
+    digest: IMAGE_DIGEST
+    pullPolicy: IfNotPresent
+
+executor: KubernetesExecutor
+
+# A task becomes a pod. On this node that means roughly two concurrent tasks,
+# which is why the DAGs delegate real work to Databricks rather than doing it
+# here — the task pod waits on a Databricks run, it does not process data.
+config:
+  core:
+    parallelism: 4
+    max_active_tasks_per_dag: 2
+    max_active_runs_per_dag: 1
+  kubernetes_executor:
+    worker_pods_creation_batch_size: 2
+    delete_worker_pods: "True"
+    # Failed pods are kept so their logs survive for the postmortem. Successful
+    # ones are deleted immediately; on a small node, completed pods still hold
+    # scheduling slots.
+    delete_worker_pods_on_failure: "False"
+  logging:
+    # Quoted. Everything under `config` is rendered into airflow.cfg as text,
+    # and the chart's own templates compare these values as strings — an
+    # unquoted YAML boolean renders as `false` and fails the comparison with a
+    # template error rather than a config error.
+    #
+    # Task logs stay in the pod. Remote logging to blob is the production answer
+    # and is off here: it needs a storage credential, and the point of this
+    # platform is that there isn't one.
+    remote_logging: "False"
+  webserver:
+    expose_config: "False"
+    warn_deployment_exposure: "False"
+  metrics:
+    statsd_on: "True"
+    statsd_host: airflow-statsd
+    statsd_port: 9125
+
+# ── Workload identity ────────────────────────────────────────────────────────
+# The label is what makes the Azure Workload Identity webhook inject the
+# projected token; the annotation is what tells it which Entra identity to
+# federate into. Both are required — with only the annotation, nothing happens
+# and the failure looks like a permissions problem.
+# The ServiceAccount is created by kubernetes/airflow/serviceaccount.yaml, not
+# by the chart — the chart has no global serviceAccount block, so `create: true`
+# here would silently do nothing and every component would fail to schedule.
+labels:
+  azure.workload.identity/use: "true"
+
+workers:
+  labels:
+    azure.workload.identity/use: "true"
+  serviceAccount:
+    create: false
+    name: airflow
+  resources:
+    requests:
+      cpu: 50m
+      memory: 256Mi
+    limits:
+      memory: 768Mi
+  # Task pods are cattle. Terminating one promptly frees the slot for the next.
+  terminationGracePeriodSeconds: 30
+
+scheduler:
+  replicas: 1
+  # Recreate, not RollingUpdate.
+  #
+  # A rolling update needs the old and new pods scheduled simultaneously. On a
+  # single 2 vCPU node there is no room for two schedulers, so the new pod sits
+  # Pending until the Helm timeout while the old one holds the resources it
+  # needs — an upgrade that can never converge.
+  #
+  # Recreate accepts a few seconds of downtime instead. That is the same trade
+  # as max_surge = "10%" on the AKS node pool, made for the same reason: a brief
+  # outage beats an upgrade that cannot run.
+  strategy:
+    type: Recreate
+
+  serviceAccount:
+    create: false
+    name: airflow
+  resources:
+    requests:
+      cpu: 150m
+      memory: 512Mi
+    limits:
+      memory: 1Gi
+  livenessProbe:
+    # The default 60s is too aggressive on a burstable node that may be out of
+    # CPU credits — the scheduler gets killed for being slow, which makes it
+    # slower.
+    initialDelaySeconds: 60
+    periodSeconds: 60
+    failureThreshold: 10
+
+webserver:
+  replicas: 1
+  # Recreate, not RollingUpdate.
+  #
+  # A rolling update needs the old and new pods scheduled simultaneously. On a
+  # single 2 vCPU node there is no room for two schedulers, so the new pod sits
+  # Pending until the Helm timeout while the old one holds the resources it
+  # needs — an upgrade that can never converge.
+  #
+  # Recreate accepts a few seconds of downtime instead. That is the same trade
+  # as max_surge = "10%" on the AKS node pool, made for the same reason: a brief
+  # outage beats an upgrade that cannot run.
+  strategy:
+    type: Recreate
+
+  serviceAccount:
+    create: false
+    name: airflow
+  resources:
+    requests:
+      cpu: 100m
+      memory: 512Mi
+    limits:
+      memory: 1Gi
+  service:
+    # ClusterIP, reached with `kubectl port-forward`. A LoadBalancer would add
+    # a public IP and put the Airflow UI on the internet behind nothing but a
+    # password.
+    type: ClusterIP
+  defaultUser:
+    enabled: false
+
+triggerer:
+  # Deferrable operators are the reason this platform fits. A DatabricksRunNow
+  # in deferrable mode releases its worker pod while the job runs and resumes
+  # on the triggerer — so a four-hour Databricks job occupies no pod for four
+  # hours. Without it, two concurrent jobs would saturate the node.
+  enabled: true
+  replicas: 1
+  # StatefulSets use updateStrategy rather than strategy, and OnDelete stops the
+  # controller replacing the pod before the node can fit a replacement.
+  updateStrategy:
+    type: OnDelete
+  serviceAccount:
+    create: false
+    name: airflow
+  resources:
+    requests:
+      cpu: 50m
+      memory: 256Mi
+    limits:
+      memory: 512Mi
+
+# statsd feeds Prometheus the scheduler and DAG metrics the Grafana dashboards
+# and the SLO alerts are built on.
+statsd:
+  enabled: true
+  # The chart's statsd container sets neither runAsNonRoot nor a seccompProfile,
+  # so it is rejected outright by Pod Security `restricted`. Supplied here
+  # rather than relaxing the namespace for every workload.
+  securityContexts:
+    pod:
+      runAsUser: 65534
+      runAsGroup: 65534
+      runAsNonRoot: true
+      seccompProfile:
+        type: RuntimeDefault
+    container:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: ["ALL"]
+  resources:
+    requests:
+      cpu: 25m
+      memory: 64Mi
+    limits:
+      memory: 128Mi
+
+flower:
+  enabled: false
+
+redis:
+  # CeleryExecutor only. KubernetesExecutor has no broker.
+  enabled: false
+
+# ── Metadata database ────────────────────────────────────────────────────────
+# In-cluster Postgres on a managed disk. Survives pod restarts and `az aks
+# stop/start`; lost with the cluster. Production points at Azure Database for
+# PostgreSQL Flexible Server instead — see ADR-010 and envs/prod.
+postgresql:
+  # Disabled. Bitnami withdrew the tag this subchart pins, so it no longer
+  # resolves on Docker Hub, and its pod spec does not satisfy Pod Security
+  # `restricted`. Replaced by kubernetes/airflow/postgres.yaml, which runs the
+  # official image and is forty lines we control. See ADR-010.
+  enabled: false
+
+data:
+  metadataSecretName: airflow-metadata
+
+# ── DAGs ─────────────────────────────────────────────────────────────────────
+# Baked into the image (see docker/airflow/Dockerfile), not synced at runtime.
+# Either way the repository is the only path a DAG takes into production; the
+# image route additionally makes the DAG set immutable and rollback-exact, and
+# removes GitHub from the scheduler's startup path.
+#
+# To switch to git-sync instead, set gitSync.enabled true and drop the COPY from
+# the Dockerfile. A private repository additionally needs an SSH key or a token
+# in `dags.gitSync.credentialsSecret`.
+dags:
+  gitSync:
+    enabled: false
+
+createUserJob:
+  useHelmHooks: false
+  applyCustomEnv: false
+
+migrateDatabaseJob:
+  useHelmHooks: false
+  applyCustomEnv: false
+
+# Every pod runs unprivileged with a read-only root filesystem where the chart
+# allows it. Airflow needs a writable logs path, which is an emptyDir.
+securityContexts:
+  pod:
+    runAsUser: 50000
+    runAsGroup: 0
+    fsGroup: 50000
+    runAsNonRoot: true
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL

@@ -175,6 +175,15 @@ jobs:
           # environment; ARM_USE_OIDC is what tells it to.
           ARM_USE_OIDC: 'true'
           ARM_USE_AZUREAD: 'true'
+          # ARM_*, not AZURE_*. azure/login exports AZURE_CLIENT_ID and
+          # AZURE_TENANT_ID, which the azurerm *backend* does not read — and a
+          # backend block cannot take Terraform variables, so the values have to
+          # arrive through the environment. Without these, init fails with
+          # "a Tenant ID must be configured when authenticating with OIDC" even
+          # though the Azure login plainly succeeded.
+          ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+          ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+          ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
           TF_VAR_subscription_id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
           TF_VAR_tenant_id: ${{ vars.AZURE_TENANT_ID }}
           TF_VAR_unique_suffix: ${{ vars.UNIQUE_SUFFIX }}
@@ -250,6 +259,10 @@ jobs:
         env:
           ARM_USE_OIDC: 'true'
           ARM_USE_AZUREAD: 'true'
+          # See the note in the plan job — the backend reads ARM_*, not AZURE_*.
+          ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+          ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+          ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
           AUTO_APPROVE: '1'
           TF_VAR_subscription_id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
           TF_VAR_tenant_id: ${{ vars.AZURE_TENANT_ID }}

@@ -40,9 +40,36 @@ read -r total_used total_limit <<<"$(
 
 available=$(( total_limit - total_used ))
 
-printf 'Total regional vCPUs   used %s of %s (%s available)\n' \
+# What this environment already consumes counts as available *to it*. Without
+# this the check is wrong in the only state that matters day to day: a deployed
+# environment's own nodes sit in `used`, so comparing its full ceiling against
+# `available` blocks a platform that is running fine and needs no new capacity.
+# The first CI apply failed exactly this way -- "BLOCKED: 4 vCPU required, 2
+# available" on a healthy cluster already holding the other 2.
+env_used=0
+cluster_name="aks-yoda-${ENVIRONMENT}"
+cluster_rg="rg-yoda-${ENVIRONMENT}-compute"
+
+if pools=$(az aks show -g "$cluster_rg" -n "$cluster_name" \
+             --query "agentPoolProfiles[].{count:count,size:vmSize}" -o json 2>/dev/null); then
+  while read -r count size; do
+    [[ -z "$size" || "$size" == "null" ]] && continue
+    cores=$(az vm list-sizes --location "$REGION" \
+              --query "[?name=='${size}'].numberOfCores | [0]" -o tsv 2>/dev/null)
+    [[ -z "$cores" || "$cores" == "None" ]] && cores=0
+    env_used=$(( env_used + count * cores ))
+  done < <(echo "$pools" | jq -r '.[] | "\(.count) \(.size)"')
+fi
+
+effective=$(( available + env_used ))
+
+printf 'Total regional vCPUs     used %s of %s (%s available)\n' \
   "$total_used" "$total_limit" "$available"
-printf 'This environment needs %s\n\n' "$REQUIRED_VCPU"
+if (( env_used > 0 )); then
+  printf 'Already held by %-8s %s (reusable by this apply)\n' "$ENVIRONMENT" "$env_used"
+  printf 'Effectively available    %s\n' "$effective"
+fi
+printf 'This environment needs   %s\n\n' "$REQUIRED_VCPU"
 
 # The B-series family has its own limit independent of the regional total.
 # Being inside the regional budget and outside the family budget is a real and
@@ -57,9 +84,10 @@ if [[ -n "${fam_used:-}" ]]; then
   printf 'Standard Bsv2 family   used %s of %s\n\n' "$fam_used" "$fam_limit"
 fi
 
-if (( available < REQUIRED_VCPU )); then
+if (( effective < REQUIRED_VCPU )); then
   cat <<EOF
-BLOCKED: $REQUIRED_VCPU vCPU required, $available available.
+BLOCKED: $REQUIRED_VCPU vCPU required, $effective effectively available
+($available free, $env_used already held by this environment).
 
 Options, cheapest first:
   1. Free capacity that is already yours:
@@ -75,4 +103,4 @@ EOF
   exit 1
 fi
 
-echo "OK: $REQUIRED_VCPU vCPU required, $available available."
+echo "OK: $REQUIRED_VCPU vCPU required, $effective effectively available."

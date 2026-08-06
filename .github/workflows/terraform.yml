@@ -187,6 +187,16 @@ jobs:
           TF_VAR_subscription_id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
           TF_VAR_tenant_id: ${{ vars.AZURE_TENANT_ID }}
           TF_VAR_unique_suffix: ${{ vars.UNIQUE_SUFFIX }}
+          # Without these three, CI plans against variable defaults and produces
+          # a different plan than the operator: empty operator_ip_ranges removes
+          # the AKS API allowlist and the storage firewall rule, empty
+          # budget_alert_emails destroys the action-group receivers, and empty
+          # platform_admin_object_ids drops the AKS admin group binding.
+          # Everything else the environment needs is committed in
+          # environment.auto.tfvars.
+          TF_VAR_operator_ip_ranges: ${{ format('["{0}"]', secrets.OPERATOR_IP_CIDR) }}
+          TF_VAR_budget_alert_emails: ${{ format('["{0}"]', secrets.ALERT_EMAIL) }}
+          TF_VAR_platform_admin_object_ids: ${{ format('["{0}"]', vars.PLATFORM_ADMIN_OBJECT_ID) }}
         run: |
           set -o pipefail
           make init ENV=sandbox
@@ -267,6 +277,16 @@ jobs:
           TF_VAR_subscription_id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
           TF_VAR_tenant_id: ${{ vars.AZURE_TENANT_ID }}
           TF_VAR_unique_suffix: ${{ vars.UNIQUE_SUFFIX }}
+          # Without these three, CI plans against variable defaults and produces
+          # a different plan than the operator: empty operator_ip_ranges removes
+          # the AKS API allowlist and the storage firewall rule, empty
+          # budget_alert_emails destroys the action-group receivers, and empty
+          # platform_admin_object_ids drops the AKS admin group binding.
+          # Everything else the environment needs is committed in
+          # environment.auto.tfvars.
+          TF_VAR_operator_ip_ranges: ${{ format('["{0}"]', secrets.OPERATOR_IP_CIDR) }}
+          TF_VAR_budget_alert_emails: ${{ format('["{0}"]', secrets.ALERT_EMAIL) }}
+          TF_VAR_platform_admin_object_ids: ${{ format('["{0}"]', vars.PLATFORM_ADMIN_OBJECT_ID) }}
         run: |
           set -o pipefail
           make init  ENV=sandbox

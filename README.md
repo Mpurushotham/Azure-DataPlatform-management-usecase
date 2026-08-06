@@ -167,6 +167,7 @@ Detail: [docs/SECURITY.md](docs/SECURITY.md) ·
 | Document | Answers |
 |---|---|
 | [SOLUTION-DESIGN.md](docs/SOLUTION-DESIGN.md) | Design-authority view: context, requirements, NFRs, risks, roadmap |
+| [TECH-STACK.md](docs/TECH-STACK.md) | Every Azure service and tool: what, why, and what was rejected instead |
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | What the platform is and how data flows |
 | [ARCHITECTURE-VISUAL.md](docs/ARCHITECTURE-VISUAL.md) | Top-to-bottom service view; links the iconographic rendering |
 | [DECISIONS.md](docs/DECISIONS.md) | Why each choice, what it cost, when to revisit |
@@ -179,6 +180,7 @@ Detail: [docs/SECURITY.md](docs/SECURITY.md) ·
 | [RUNBOOKS.md](docs/RUNBOOKS.md) | Incident response — every alert links here |
 | [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Symptom-first diagnostics: "X is broken, how do I fix it" |
 | [MCP.md](docs/MCP.md) | MCP servers configured, and why only three |
+| [CI-STANDARDS.md](docs/CI-STANDARDS.md) | What runs on a PR, action pinning policy, config-parity rule |
 | [ONBOARDING-DOMAIN.md](docs/ONBOARDING-DOMAIN.md) | Adding a data domain |
 | [COVERAGE.md](docs/COVERAGE.md) | Requirement → artefact traceability |
 | [BUILD-LOG.md](docs/BUILD-LOG.md) | How it was built: decisions, 18 failures found by applying, what changed |

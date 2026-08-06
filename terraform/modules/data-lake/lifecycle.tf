@@ -110,6 +110,27 @@ resource "azurerm_storage_management_policy" "lake" {
     }
   }
 
+  # ── Exports: shortest life of any layer ────────────────────────────────────
+  # An extract that has not been collected in 14 days was not wanted, and every
+  # day it sits there is a day a copy of internal data exists outside the
+  # governed path. Deleted rather than tiered: cooling it would keep it cheaply
+  # for longer, which is the opposite of the intent.
+  rule {
+    name    = "exports-expire"
+    enabled = true
+
+    filters {
+      prefix_match = ["exports/"]
+      blob_types   = ["blockBlob"]
+    }
+
+    actions {
+      base_blob {
+        delete_after_days_since_creation_greater_than = 14
+      }
+    }
+  }
+
   # Deliberately absent: any rule touching checkpoints/. Structured Streaming
   # reads its checkpoint on every microbatch. A cool-tiered checkpoint adds
   # latency to every trigger; an archived one stops the stream entirely and the

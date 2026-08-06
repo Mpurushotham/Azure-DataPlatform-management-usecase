@@ -71,6 +71,10 @@ locals {
       classification = "internal"
       description    = "Unity Catalog managed-table root. Written only by the Access Connector identity."
     }
+    exports = {
+      classification = "restricted"
+      description    = "Outbound data products — partner extracts and Delta Sharing staging. Restricted because anything here is, by definition, about to leave."
+    }
   }
 }
 

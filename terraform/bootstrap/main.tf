@@ -15,6 +15,17 @@
 
 data "azurerm_subscription" "current" {}
 
+locals {
+  # GitHub may issue either the documented subject prefix or an immutable,
+  # ID-qualified one. Whichever it is, the federated credential must match it
+  # exactly — see the note on var.github_subject_prefix.
+  github_subject_prefix = (
+    var.github_subject_prefix != ""
+    ? var.github_subject_prefix
+    : "repo:${var.github_repository}"
+  )
+}
+
 data "azurerm_resource_group" "state" {
   name = var.state_resource_group_name
 }
@@ -60,7 +71,7 @@ resource "azurerm_federated_identity_credential" "github_environment" {
   parent_id           = azurerm_user_assigned_identity.terraform.id
   audience            = ["api://AzureADTokenExchange"]
   issuer              = "https://token.actions.githubusercontent.com"
-  subject             = "repo:${var.github_repository}:environment:${each.value}"
+  subject             = "${local.github_subject_prefix}:environment:${each.value}"
 }
 
 # Pull requests plan but never apply, so they get a subject of their own and the
@@ -71,7 +82,7 @@ resource "azurerm_federated_identity_credential" "github_pull_request" {
   parent_id           = azurerm_user_assigned_identity.terraform.id
   audience            = ["api://AzureADTokenExchange"]
   issuer              = "https://token.actions.githubusercontent.com"
-  subject             = "repo:${var.github_repository}:pull_request"
+  subject             = "${local.github_subject_prefix}:pull_request"
 }
 
 # Azure DevOps — optional, because the pipeline is written to skip its

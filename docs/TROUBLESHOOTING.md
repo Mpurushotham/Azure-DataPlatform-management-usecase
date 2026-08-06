@@ -421,16 +421,45 @@ invisible to it. Prefer making the control *structurally impossible to omit* —
 required variable with a validation — over suppressing the finding. That is what
 `api_server_authorized_ip_ranges` does.
 
-### OIDC federation fails in GitHub Actions
-
-The subject must match exactly:
+### OIDC federation fails — `AADSTS700213`
 
 ```
-repo:Mpurushotham/Azure-DataPlatform-management-usecase:environment:sandbox
+AADSTS700213: No matching federated identity record found for presented
+assertion subject 'repo:owner@23453932/repo@1324202164:environment:sandbox'
 ```
 
-Check `terraform/bootstrap/variables.tf` `github_repository`, and that the job
-declares `permissions: id-token: write` and the right `environment:`.
+**Read the subject in the error.** GitHub increasingly issues an *immutable*,
+ID-qualified subject rather than the documented `repo:<owner>/<repo>` form:
+
+```
+documented    repo:Mpurushotham/Azure-DataPlatform-management-usecase:environment:sandbox
+actual        repo:Mpurushotham@23453932/Azure-DataPlatform-management-usecase@1324202164:environment:sandbox
+```
+
+The numeric IDs make the credential survive a repository rename, which is an
+improvement — but a federated credential built from the form in every guide
+then matches nothing, and the error names the subject without explaining why it
+differs.
+
+**Do not guess which form applies.** Ask GitHub:
+
+```bash
+gh api repos/<owner>/<repo>/actions/oidc/customization/sub --jq .sub_claim_prefix
+```
+
+Then set it and re-apply bootstrap:
+
+```hcl
+# terraform/bootstrap/terraform.tfvars
+github_subject_prefix = "repo:Mpurushotham@23453932/Azure-DataPlatform-management-usecase@1324202164"
+```
+
+Leaving `github_subject_prefix` empty falls back to the documented form, which
+is still correct for repositories GitHub has not migrated.
+
+Also confirm the job declares `permissions: id-token: write` and names the
+`environment:` the credential was created for — a PR uses the `:pull_request`
+subject, not the environment one.
 
 ### tflint reports unused declarations
 

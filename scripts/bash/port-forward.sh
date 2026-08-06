@@ -62,11 +62,14 @@ sleep 3
 
 GRAFANA_PW=$(kubectl get secret grafana-admin -n monitoring \
   -o jsonpath='{.data.admin-password}' 2>/dev/null | base64 -d || echo "<not found>")
+AIRFLOW_PW=$(kubectl get secret airflow-admin -n airflow \
+  -o jsonpath='{.data.password}' 2>/dev/null | base64 -d || echo "<not found — see docs/ACCESS.md>")
 
 cat <<EOF
 
   Airflow      http://localhost:8080
-               no login — reaching this port is the authorisation
+               user     admin
+               password ${AIRFLOW_PW}
                the logistics_medallion DAG ships paused, deliberately
 
   Grafana      http://localhost:3000

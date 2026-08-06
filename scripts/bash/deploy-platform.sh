@@ -182,6 +182,37 @@ helm upgrade --install airflow apache-airflow/airflow \
   --values "$VALUES_RENDERED" \
   --wait --timeout 20m
 
+# ── 5b. Airflow admin user ───────────────────────────────────────────────────
+# The chart's `defaultUser` is disabled, which removes the account but does NOT
+# disable authentication: the webserver still runs AUTH_DB and still demands a
+# login. Left as-is that produces a login page no credential can satisfy, which
+# is how this was first discovered.
+#
+# Created after the chart rather than through `webserver.defaultUser` because
+# that block takes the password in plaintext values. Here it comes from a
+# Kubernetes secret, the same pattern as Grafana.
+echo
+echo "==> Airflow admin user"
+if ! kubectl get secret airflow-admin -n airflow >/dev/null 2>&1; then
+  AIRFLOW_PW="$(openssl rand -base64 24 | tr -d '/+=' | head -c 28)"
+  kubectl create secret generic airflow-admin -n airflow \
+    --from-literal=username=admin \
+    --from-literal=password="$AIRFLOW_PW" >/dev/null
+  echo "    created secret airflow-admin"
+else
+  AIRFLOW_PW=$(kubectl get secret airflow-admin -n airflow \
+    -o jsonpath='{.data.password}' | base64 -d)
+  echo "    secret airflow-admin exists, reusing it"
+fi
+
+# `users create` is idempotent enough — it reports an existing username rather
+# than failing the deploy.
+kubectl exec -n airflow deploy/airflow-webserver -c webserver -- \
+  airflow users create --username admin --firstname Platform --lastname Admin \
+  --role Admin --email "${AIRFLOW_ADMIN_EMAIL:-platform@example.com}" \
+  --password "$AIRFLOW_PW" >/dev/null 2>&1 || true
+echo "    admin user present"
+
 # ── 6. What to do next ───────────────────────────────────────────────────────
 cat <<EOF
 
@@ -189,6 +220,9 @@ Deployed.
 
   Airflow UI    kubectl port-forward -n airflow svc/airflow-webserver 8080:8080
                 http://localhost:8080
+                user     admin
+                password kubectl get secret airflow-admin -n airflow \\
+                           -o jsonpath='{.data.password}' | base64 -d
 
   Grafana       kubectl port-forward -n monitoring svc/kps-grafana 3000:80
                 http://localhost:3000

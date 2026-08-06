@@ -75,8 +75,23 @@ kubectl port-forward -n airflow svc/airflow-webserver 8080:8080
 
 → **http://localhost:8080**
 
-No login prompt: `webserver.defaultUser.enabled` is false, so there is no local
-Airflow account to compromise. Reaching the port-forward *is* the authorisation.
+```
+user      admin
+password  kubectl get secret airflow-admin -n airflow \
+            -o jsonpath='{.data.password}' | base64 -d
+```
+
+Generated at deploy time and stored only as a Kubernetes secret, the same
+pattern as Grafana.
+
+> **Why there is a password at all.** The chart's `defaultUser` is disabled,
+> and disabling it removes the *account* without disabling *authentication* —
+> the webserver still runs `AUTH_TYPE = AUTH_DB` and still demands a login. The
+> first version of this platform shipped that way and produced a login page no
+> credential could satisfy. The alternative, `AUTH_ROLE_PUBLIC = Admin`, would
+> make the UI genuinely passwordless and is defensible behind a port-forward —
+> but it becomes an open admin console the moment anyone puts an ingress in
+> front, which is too sharp an edge to leave lying around.
 
 What to look at: the `logistics_medallion` DAG, its task graph, and task logs.
 The DAG ships **paused** — that is deliberate. Unpausing a DAG whose

@@ -12,6 +12,9 @@ crash.*.log
 backend.hcl
 *.tfvars
 !*.tfvars.example
+# Committed on purpose: non-sensitive environment configuration that CI and the
+# operator must both see, or their plans diverge. See the header of the file.
+!**/environment.auto.tfvars
 override.tf
 override.tf.json
 *_override.tf

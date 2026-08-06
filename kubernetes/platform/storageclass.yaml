@@ -1,0 +1,52 @@
+# =============================================================================
+# Tagged storage class — makes CSI-created disks attributable
+# =============================================================================
+# AKS creates managed disks for every PersistentVolumeClaim through the Azure
+# Disk CSI driver. Those disks live in the AKS-owned node resource group and, on
+# the built-in `managed-csi` class, carry no tags at all.
+#
+# That is not cosmetic. On this platform the FinOps report groups spend by the
+# `platform`, `environment`, `domain` and `cost-center` tags, and untagged spend
+# is reported as unowned. Measured against the live subscription, AKS-managed
+# resources were 99 percent of month-to-date cost and every one of them was
+# untagged — so the tagging story was materially weaker than the Azure Policy
+# compliance view suggested.
+#
+# The CSI driver copies whatever is in the `tags` parameter onto the disk it
+# creates, which is the only place these tags can come from: Terraform never
+# sees these disks, and Azure Policy can only report them, not fix them.
+#
+# ── Applying this to an existing cluster ─────────────────────────────────────
+# `volumeClaimTemplates` on a StatefulSet is immutable, and `storageClassName`
+# on a bound PVC cannot be changed. Pointing the Helm values at this class
+# therefore takes effect on the NEXT rebuild, not on the next `helm upgrade` —
+# an upgrade against existing StatefulSets fails on the immutable field.
+#
+# To adopt it on a running cluster, recreate the workload's storage
+# deliberately, accepting the data loss that implies:
+#
+#   kubectl delete statefulset <name> -n <ns> --cascade=orphan
+#   kubectl delete pvc -l app=<name> -n <ns>
+#   make platform-deploy ENV=sandbox
+#
+# For Airflow that loses run history, and for Prometheus it loses metric
+# history — both stated as acceptable in ADR-010 and ADR-011 respectively.
+# =============================================================================
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: yoda-managed-csi
+  labels:
+    platform: yoda
+provisioner: disk.csi.azure.com
+parameters:
+  skuName: StandardSSD_LRS
+  # The whole point of this file. Comma-separated key=value pairs, copied onto
+  # the managed disk at creation.
+  tags: "platform=yoda,environment=sandbox,owner=data-platform-team,cost-center=data-platform,managed-by=csi-driver"
+reclaimPolicy: Delete
+# Bind late so the disk is created in the zone the pod is actually scheduled to.
+# Immediate binding on a zonal cluster can place a disk in a zone with no
+# schedulable node, and the pod then stays Pending with a confusing message.
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true

@@ -117,7 +117,7 @@ spec:
         name: data
       spec:
         accessModes: ["ReadWriteOnce"]
-        storageClassName: managed-csi
+        storageClassName: yoda-managed-csi
         resources:
           requests:
             storage: 8Gi

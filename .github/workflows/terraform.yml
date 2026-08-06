@@ -175,16 +175,39 @@ jobs:
           # environment; ARM_USE_OIDC is what tells it to.
           ARM_USE_OIDC: 'true'
           ARM_USE_AZUREAD: 'true'
+          # ARM_*, not AZURE_*. azure/login exports AZURE_CLIENT_ID and
+          # AZURE_TENANT_ID, which the azurerm *backend* does not read — and a
+          # backend block cannot take Terraform variables, so the values have to
+          # arrive through the environment. Without these, init fails with
+          # "a Tenant ID must be configured when authenticating with OIDC" even
+          # though the Azure login plainly succeeded.
+          ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+          ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+          ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
           TF_VAR_subscription_id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
           TF_VAR_tenant_id: ${{ vars.AZURE_TENANT_ID }}
           TF_VAR_unique_suffix: ${{ vars.UNIQUE_SUFFIX }}
+          # Without these three, CI plans against variable defaults and produces
+          # a different plan than the operator: empty operator_ip_ranges removes
+          # the AKS API allowlist and the storage firewall rule, empty
+          # budget_alert_emails destroys the action-group receivers, and empty
+          # platform_admin_object_ids drops the AKS admin group binding.
+          # Everything else the environment needs is committed in
+          # environment.auto.tfvars.
+          TF_VAR_operator_ip_ranges: ${{ format('["{0}"]', secrets.OPERATOR_IP_CIDR) }}
+          TF_VAR_budget_alert_emails: ${{ format('["{0}"]', secrets.ALERT_EMAIL) }}
+          TF_VAR_platform_admin_object_ids: ${{ format('["{0}"]', vars.PLATFORM_ADMIN_OBJECT_ID) }}
         run: |
           set -o pipefail
           make init ENV=sandbox
           make plan ENV=sandbox 2>&1 | tee plan.txt
           {
             echo 'summary<<PLANEOF'
-            grep -E '^(Plan:|No changes)' plan.txt || echo 'Plan produced no summary line'
+            # Strip ANSI first: `make plan` colourises, so the summary line
+            # starts with escape codes and an anchored grep never matches it.
+            sed 's/\x1b\[[0-9;]*m//g' plan.txt \
+              | grep -E '^(Plan:|No changes|Error:)' \
+              || echo 'Plan produced no summary line'
             echo 'PLANEOF'
           } >> "$GITHUB_OUTPUT"
 
@@ -250,10 +273,24 @@ jobs:
         env:
           ARM_USE_OIDC: 'true'
           ARM_USE_AZUREAD: 'true'
+          # See the note in the plan job — the backend reads ARM_*, not AZURE_*.
+          ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+          ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+          ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
           AUTO_APPROVE: '1'
           TF_VAR_subscription_id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
           TF_VAR_tenant_id: ${{ vars.AZURE_TENANT_ID }}
           TF_VAR_unique_suffix: ${{ vars.UNIQUE_SUFFIX }}
+          # Without these three, CI plans against variable defaults and produces
+          # a different plan than the operator: empty operator_ip_ranges removes
+          # the AKS API allowlist and the storage firewall rule, empty
+          # budget_alert_emails destroys the action-group receivers, and empty
+          # platform_admin_object_ids drops the AKS admin group binding.
+          # Everything else the environment needs is committed in
+          # environment.auto.tfvars.
+          TF_VAR_operator_ip_ranges: ${{ format('["{0}"]', secrets.OPERATOR_IP_CIDR) }}
+          TF_VAR_budget_alert_emails: ${{ format('["{0}"]', secrets.ALERT_EMAIL) }}
+          TF_VAR_platform_admin_object_ids: ${{ format('["{0}"]', vars.PLATFORM_ADMIN_OBJECT_ID) }}
         run: |
           set -o pipefail
           make init  ENV=sandbox

@@ -44,7 +44,7 @@ prometheus:
     storageSpec:
       volumeClaimTemplate:
         spec:
-          storageClassName: managed-csi
+          storageClassName: yoda-managed-csi
           accessModes: ["ReadWriteOnce"]
           resources:
             requests:
@@ -73,7 +73,7 @@ grafana:
 
   persistence:
     enabled: true
-    storageClassName: managed-csi
+    storageClassName: yoda-managed-csi
     size: 2Gi
 
   resources:

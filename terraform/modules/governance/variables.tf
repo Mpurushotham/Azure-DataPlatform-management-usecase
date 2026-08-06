@@ -76,9 +76,24 @@ variable "enforcement_mode" {
 }
 
 variable "monthly_budget" {
-  description = "Monthly subscription budget in the billing currency. Alerts only — Azure budgets never stop spend by themselves."
+  description = <<-EOT
+    Monthly subscription budget, **in the subscription's billing currency**.
+
+    Azure budgets have no currency field — the amount is always interpreted in
+    the billing currency, which is not necessarily the currency the design was
+    reasoned in. This subscription bills in SEK while the cost analysis in
+    docs/FINOPS.md is written in EUR, so a value of 50 meant for "EUR 50"
+    silently became a budget roughly five times tighter than intended, and the
+    first alert fired on a platform that was operating normally.
+
+    Confirm the billing currency before setting this:
+
+      az rest --method post --url \
+        "https://management.azure.com/subscriptions/<sub>/providers/Microsoft.CostManagement/query?api-version=2023-11-01" \
+        --body '{"type":"ActualCost","timeframe":"MonthToDate","dataset":{"granularity":"None","aggregation":{"c":{"name":"Cost","function":"Sum"}}}}'
+  EOT
   type        = number
-  default     = 50
+  default     = 500
 }
 
 variable "budget_action_group_ids" {

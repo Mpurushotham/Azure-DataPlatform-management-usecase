@@ -70,7 +70,35 @@ make cost ENV=sandbox
 `scripts/python/finops_report.py` groups actual cost by each tag and **reports
 untagged spend first**. Anything in that bucket is the finding, not a rounding
 error: it is spend nobody owns, which means it is spend nobody will reduce.
-Resources created outside Terraform are the usual source.
+
+### What the first real run found
+
+Running this against the live subscription is the reason this section exists.
+Month-to-date, **99 percent of spend was untagged**:
+
+| Resource type | Share | Tagged? | Why |
+|---|---:|---|---|
+| VM scale set (AKS nodes) | 78% | no | AKS-managed, in the node resource group |
+| Managed disks (PVCs) | 7% | no | Created by the CSI driver, not Terraform |
+| Public IP, load balancer | 3% | no | AKS-managed |
+| Everything Terraform creates | 1% | **yes** | — |
+
+The Azure Policy compliance view had reported the platform as broadly compliant,
+because it evaluates the resources Terraform creates. It cannot see that the
+majority of *spend* sits in resources Terraform never touches.
+
+Two things follow, and both are now in the repository:
+
+1. **`kubernetes/platform/storageclass.yaml`** — a storage class carrying the
+   cost-attribution tags, which the CSI driver copies onto every disk it
+   creates. This is the only place those tags can come from.
+2. **The AKS node resource group is a known, permanent gap.** The scale set and
+   load balancer are created by the AKS resource provider and cannot be tagged
+   from Terraform. Treat that line as platform overhead attributed to
+   `data-platform`, not as an attribution failure to chase.
+
+The lesson generalises: *policy compliance is not cost attribution.* A platform
+can be fully compliant and still have most of its bill unowned.
 
 ---
 
@@ -138,6 +166,14 @@ just raise the cap — raising it usually just pays for the bug.
 80%  actual     act now — park the cluster
 100% actual     already over; the credit is finite
 ```
+
+**The budget amount is in the subscription's billing currency, and Azure
+budgets have no currency field.** This subscription bills in **SEK** while
+every figure in this document is EUR. A budget set to `50` meaning "EUR 50"
+became SEK 50 — roughly five times tighter than intended — and reported a
+platform operating normally as 489 percent over budget. The default is now
+SEK 550, which is about EUR 50. Confirm the billing currency before changing
+it; the command is in the variable's own documentation.
 
 Forecast thresholds come first deliberately. By the time *actual* crosses 80
 percent there may be two days left in the month; a forecast breach on day four

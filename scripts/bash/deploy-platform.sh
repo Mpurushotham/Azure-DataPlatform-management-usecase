@@ -49,6 +49,11 @@ echo
 echo "==> Namespaces and network policy"
 kubectl apply -f kubernetes/platform/namespaces.yaml
 
+# Tagged storage class. CSI-created disks are invisible to Terraform and to
+# Azure Policy remediation, so this is the only place they can pick up the
+# cost-attribution tags the FinOps report groups by.
+kubectl apply -f kubernetes/platform/storageclass.yaml
+
 # The ServiceAccount is the subject of the Entra federated credential, so it is
 # owned here rather than by the Helm chart — see kubernetes/airflow/serviceaccount.yaml.
 sed "s|AIRFLOW_CLIENT_ID|${AIRFLOW_CLIENT_ID}|g" \

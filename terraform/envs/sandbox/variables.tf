@@ -42,9 +42,14 @@ variable "budget_alert_emails" {
 }
 
 variable "monthly_budget" {
-  description = "Monthly budget in the billing currency. Alerts only — Azure budgets never stop spend."
+  description = <<-EOT
+    Monthly budget in the subscription's **billing currency** — SEK here, not
+    EUR. Roughly SEK 550 is the EUR 50 the cost design in docs/FINOPS.md is
+    written against. See the note on the governance module's variable of the
+    same name.
+  EOT
   type        = number
-  default     = 50
+  default     = 550
 }
 
 variable "budget_start_date" {

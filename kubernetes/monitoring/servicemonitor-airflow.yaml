@@ -1,0 +1,44 @@
+# =============================================================================
+# Scrape Airflow's statsd exporter
+# =============================================================================
+# Without this, Airflow emits metrics into a statsd exporter that nothing reads.
+# The exporter was running and exposing ~200 series on :9102 the whole time;
+# Prometheus simply had no ServiceMonitor telling it to look, so every Grafana
+# panel built on `airflow_*` would have been permanently empty.
+#
+# Found by checking which metric names Prometheus actually held before drawing
+# any dashboard — 1720 series, none of them Airflow's. A dashboard is the wrong
+# place to discover a missing scrape target.
+#
+# Note the prefix: this Airflow emits `airflow_*`, not the `af_*` that newer
+# documentation shows. Query the exporter rather than trusting either:
+#
+#   kubectl exec -n airflow deploy/airflow-statsd -- \
+#     wget -qO- http://localhost:9102/metrics | grep -E '^[a-z]' | head
+# =============================================================================
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: airflow-statsd
+  namespace: monitoring
+  labels:
+    app: airflow
+    # kube-prometheus-stack is configured with
+    # serviceMonitorSelectorNilUsesHelmValues: false, so no release label is
+    # needed — see kubernetes/monitoring/values-sandbox.yaml.
+    platform: yoda
+spec:
+  namespaceSelector:
+    matchNames: [airflow]
+  selector:
+    matchLabels:
+      component: statsd
+      release: airflow
+  endpoints:
+    - port: statsd-scrape
+      path: /metrics
+      # 30s rather than the default 15s. These are scheduler-loop gauges, not
+      # request metrics; doubling the interval halves the series volume for no
+      # loss of signal on a platform with one DAG.
+      interval: 30s
+      scrapeTimeout: 10s

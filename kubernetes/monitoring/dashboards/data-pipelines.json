@@ -1,0 +1,111 @@
+{
+  "uid": "yoda-data-pipelines",
+  "title": "YODA · Data pipelines",
+  "description": "Airflow's view of the medallion pipeline. Databricks job outcomes are NOT here — they arrive as Azure resource logs in Log Analytics, which Prometheus cannot see. That split is by signal origin, not preference; see docs/OBSERVABILITY.md.",
+  "tags": ["yoda", "airflow", "data"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "refresh": "1m",
+  "time": { "from": "now-24h", "to": "now" },
+  "panels": [
+    {
+      "type": "text",
+      "title": "",
+      "gridPos": { "h": 3, "w": 24, "x": 0, "y": 0 },
+      "options": {
+        "mode": "markdown",
+        "content": "**Scope.** Orchestration signals only — whether work was scheduled, queued and dispatched. Whether a Databricks job *succeeded*, and whether `gold` is fresh, are Azure resource logs: query `DatabricksJobs` and `DatabricksUnityCatalog` in Log Analytics, or see the `alert-dbx-job-failure` rule. Airflow knows it submitted a run; it does not know the table is correct."
+      }
+    },
+    {
+      "type": "stat",
+      "title": "DAGs loaded",
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 3 },
+      "targets": [ { "expr": "max(airflow_dagbag_size)", "refId": "A" } ],
+      "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [ { "color": "blue", "value": null } ] } } },
+      "options": { "colorMode": "value", "graphMode": "none" }
+    },
+    {
+      "type": "stat",
+      "title": "Import errors",
+      "description": "Non-zero means a DAG file is broken and simply absent from the UI. `make dag-test` catches this before merge.",
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 3 },
+      "targets": [ { "expr": "max(airflow_dag_processing_import_errors)", "refId": "A" } ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "red", "value": 1 }
+          ] }
+        }
+      },
+      "options": { "colorMode": "background", "graphMode": "none" }
+    },
+    {
+      "type": "stat",
+      "title": "Tasks running",
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 3 },
+      "targets": [ { "expr": "sum(airflow_executor_running_tasks)", "refId": "A" } ],
+      "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null } ] } } },
+      "options": { "colorMode": "value", "graphMode": "area" }
+    },
+    {
+      "type": "stat",
+      "title": "Tasks queued",
+      "description": "Sustained non-zero on this node means the two-concurrent-task ceiling is binding. Deferrable operators are what keep it from being hit — see ADR-014.",
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 3 },
+      "targets": [ { "expr": "sum(airflow_executor_queued_tasks)", "refId": "A" } ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "orange", "value": 3 }
+          ] }
+        }
+      },
+      "options": { "colorMode": "background", "graphMode": "area" }
+    },
+
+    {
+      "type": "timeseries",
+      "title": "DAG run schedule delay",
+      "description": "Gap between when a run was due and when it started. Growth here means the scheduler is behind — the pipeline is late before any task has run.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 7 },
+      "targets": [
+        { "expr": "rate(airflow_dagrun_schedule_delay_sum[10m]) / clamp_min(rate(airflow_dagrun_schedule_delay_count[10m]), 1)", "legendFormat": "mean delay", "refId": "A" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ms", "custom": { "fillOpacity": 10, "lineWidth": 2 } } }
+    },
+    {
+      "type": "timeseries",
+      "title": "DAG parse duration — logistics_medallion",
+      "description": "Parse time for the one DAG. A DAG that does work at import time — a query, an API call — shows up here and slows every scheduler loop.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 7 },
+      "targets": [
+        { "expr": "airflow_dag_processing_last_duration_logistics_medallion", "legendFormat": "parse duration", "refId": "A" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ms", "custom": { "fillOpacity": 10, "lineWidth": 2 } } }
+    },
+
+    {
+      "type": "timeseries",
+      "title": "Scheduler liveness",
+      "description": "Heartbeat rate. A flat zero here explains any 'nothing is running' report instantly, and is the first thing to check.",
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 15 },
+      "targets": [
+        { "expr": "rate(airflow_scheduler_heartbeat_total[5m])", "legendFormat": "heartbeat/s", "refId": "A" }
+      ],
+      "fieldConfig": { "defaults": { "custom": { "fillOpacity": 15, "lineWidth": 2 } } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Task pod lifecycle",
+      "description": "KubernetesExecutor creates a pod per task. Pods appearing and completing is the pipeline working; pods appearing and staying Pending is the capacity ceiling.",
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 15 },
+      "targets": [
+        { "expr": "sum by (phase) (kube_pod_status_phase{namespace=\"airflow\"})", "legendFormat": "{{phase}}", "refId": "A" }
+      ],
+      "fieldConfig": { "defaults": { "custom": { "fillOpacity": 20, "stacking": { "mode": "normal" } } } }
+    }
+  ]
+}

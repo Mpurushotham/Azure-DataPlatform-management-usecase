@@ -1,0 +1,135 @@
+{
+  "uid": "yoda-platform-health",
+  "title": "YODA · Platform health",
+  "description": "Is anything broken? Answers the first question an operator asks, in the order they ask it: is the scheduler alive, are DAGs parsing, is there capacity, are the pods up.",
+  "tags": ["yoda", "platform"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Scheduler",
+      "description": "Heartbeat rate. Zero means the scheduler is not scheduling — nothing will run, and no task-failure alert would fire because no task starts.",
+      "gridPos": { "h": 4, "w": 5, "x": 0, "y": 0 },
+      "targets": [
+        { "expr": "sum(rate(airflow_scheduler_heartbeat_total[5m])) > bool 0", "refId": "A" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            { "type": "value", "options": { "0": { "text": "DOWN", "color": "red", "index": 0 } } },
+            { "type": "value", "options": { "1": { "text": "Alive", "color": "green", "index": 1 } } }
+          ],
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "red", "value": null } ] }
+        }
+      },
+      "options": { "colorMode": "background", "graphMode": "none", "textMode": "value" }
+    },
+    {
+      "type": "stat",
+      "title": "DAG import errors",
+      "description": "A DAG that fails to import does not appear in the UI and never runs. The scheduler logs it and moves on — this is the only place it is visible.",
+      "gridPos": { "h": 4, "w": 5, "x": 5, "y": 0 },
+      "targets": [ { "expr": "max(airflow_dag_processing_import_errors)", "refId": "A" } ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "red", "value": 1 }
+          ] }
+        }
+      },
+      "options": { "colorMode": "background", "graphMode": "none" }
+    },
+    {
+      "type": "stat",
+      "title": "DAGs loaded",
+      "description": "Bag size. A sudden drop means DAGs stopped parsing, not that someone deleted them.",
+      "gridPos": { "h": 4, "w": 4, "x": 10, "y": 0 },
+      "targets": [ { "expr": "max(airflow_dagbag_size)", "refId": "A" } ],
+      "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null } ] } } },
+      "options": { "colorMode": "value", "graphMode": "area" }
+    },
+    {
+      "type": "stat",
+      "title": "Executor slots free",
+      "description": "Zero for a sustained period means tasks are queuing behind capacity, not failing. On a single 2 vCPU node this is the expected bottleneck.",
+      "gridPos": { "h": 4, "w": 5, "x": 14, "y": 0 },
+      "targets": [ { "expr": "min(airflow_executor_open_slots)", "refId": "A" } ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "red", "value": null },
+            { "color": "orange", "value": 1 },
+            { "color": "green", "value": 2 }
+          ] }
+        }
+      },
+      "options": { "colorMode": "background", "graphMode": "none" }
+    },
+    {
+      "type": "stat",
+      "title": "Pods not Running",
+      "description": "Across airflow and monitoring. Anything other than zero is worth a look; Completed jobs are excluded.",
+      "gridPos": { "h": 4, "w": 5, "x": 19, "y": 0 },
+      "targets": [
+        { "expr": "sum(kube_pod_status_phase{namespace=~\"airflow|monitoring\",phase=~\"Pending|Failed|Unknown\"})", "refId": "A" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "red", "value": 1 }
+          ] }
+        }
+      },
+      "options": { "colorMode": "background", "graphMode": "none" }
+    },
+
+    {
+      "type": "timeseries",
+      "title": "Executor slots — running, queued, open",
+      "description": "Queued climbing while open sits at zero is a capacity problem. Queued climbing while open is healthy is a scheduling problem.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "targets": [
+        { "expr": "airflow_executor_running_tasks", "legendFormat": "running", "refId": "A" },
+        { "expr": "airflow_executor_queued_tasks", "legendFormat": "queued", "refId": "B" },
+        { "expr": "airflow_executor_open_slots", "legendFormat": "open", "refId": "C" }
+      ],
+      "fieldConfig": { "defaults": { "custom": { "fillOpacity": 10, "lineWidth": 2 } } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Pool slots",
+      "description": "Starving tasks are tasks that could run but have no pool slot. Sustained starvation means the pool is sized wrong, not that the platform is slow.",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "targets": [
+        { "expr": "airflow_pool_running_slots_default_pool", "legendFormat": "running", "refId": "A" },
+        { "expr": "airflow_pool_queued_slots_default_pool", "legendFormat": "queued", "refId": "B" },
+        { "expr": "airflow_pool_starving_tasks", "legendFormat": "starving", "refId": "C" }
+      ],
+      "fieldConfig": { "defaults": { "custom": { "fillOpacity": 10, "lineWidth": 2 } } }
+    },
+
+    {
+      "type": "timeseries",
+      "title": "DAG parse time",
+      "description": "Total time to parse every DAG file. Growth here delays every schedule decision — the scheduler cannot dispatch what it has not parsed.",
+      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 12 },
+      "targets": [ { "expr": "airflow_dag_processing_total_parse_time", "legendFormat": "parse time", "refId": "A" } ],
+      "fieldConfig": { "defaults": { "unit": "s", "custom": { "fillOpacity": 10 } } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Pod restarts (1h)",
+      "description": "A pod restarting repeatedly is usually OOM on this node. Check limits before blaming the workload.",
+      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 12 },
+      "targets": [
+        { "expr": "increase(kube_pod_container_status_restarts_total{namespace=~\"airflow|monitoring\"}[1h]) > 0", "legendFormat": "{{namespace}}/{{pod}}", "refId": "A" }
+      ],
+      "fieldConfig": { "defaults": { "custom": { "fillOpacity": 0, "lineWidth": 2 } } }
+    }
+  ]
+}

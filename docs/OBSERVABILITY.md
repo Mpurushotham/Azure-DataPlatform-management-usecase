@@ -104,13 +104,26 @@ Dashboards live as ConfigMaps loaded by the Grafana sidecar. A dashboard edited
 in the UI is lost on pod restart — deliberately, since the repository is the
 source.
 
+Three are built, in `kubernetes/monitoring/dashboards/`, loaded into a **YODA**
+folder:
+
 | Dashboard | Answers | Key panels |
 |---|---|---|
-| Platform health | Is anything broken? | Scheduler heartbeat, task success rate, node pressure, PVC usage |
-| Data freshness | Is gold current? | Time since last successful run per domain, against the SLO line |
-| Pipeline performance | Is anything getting slower? | DAG duration p50/p95 trend, task queue depth |
-| Cost | Where is the money going? | DBU by domain, storage growth by layer, ingestion volume |
-| Security | Anything unusual? | UC denials by principal, storage auth failures, Key Vault reads |
+| **Platform health** | Is anything broken? | Scheduler liveness, DAG import errors, executor and pool slots, parse time, pod restarts |
+| **Data pipelines** | Is work being scheduled and dispatched? | Schedule delay, parse duration, task pod lifecycle, queue depth |
+| **Capacity and cost** | Where is the compute going? | vCPU against the 4-core quota, CPU/memory requested vs used, PVC and disk usage |
+
+**A scope boundary worth knowing.** These are Airflow and Kubernetes signals
+only. Whether a Databricks job *succeeded* and whether `gold` is *fresh* are
+Azure resource logs — they live in Log Analytics and Prometheus cannot see them,
+so no Grafana panel can show them. Airflow knows it submitted a run; it does not
+know the table is correct. Those questions are answered by the
+`alert-dbx-job-failure` rule and by querying `DatabricksJobs` directly.
+
+Two dashboards are therefore **not** built, because the data is in the wrong
+store for this tool: data freshness per domain, and DBU cost by domain. Adding
+them means a Log Analytics datasource in Grafana, which is a decision about
+where dashboards live rather than a missing panel.
 
 **Panels deliberately absent:** raw CPU and memory gauges. They are diagnostic
 detail, not a health signal, and putting them on the first dashboard someone

@@ -1,0 +1,133 @@
+{
+  "uid": "yoda-capacity-cost",
+  "title": "YODA · Capacity and cost",
+  "description": "Where the compute goes on a platform with a 4 vCPU ceiling and a spending limit that disables services rather than billing. Cost attribution itself lives in `make cost` — this is the physical capacity behind it.",
+  "tags": ["yoda", "finops"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "refresh": "1m",
+  "time": { "from": "now-24h", "to": "now" },
+  "panels": [
+    {
+      "type": "stat",
+      "title": "Nodes",
+      "description": "Autoscaler ceiling is 2. At 2 the regional 4 vCPU quota is fully consumed and nothing else can be created in Sweden Central.",
+      "gridPos": { "h": 4, "w": 5, "x": 0, "y": 0 },
+      "targets": [ { "expr": "count(kube_node_info)", "refId": "A" } ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "orange", "value": 2 }
+          ] }
+        }
+      },
+      "options": { "colorMode": "background", "graphMode": "none" }
+    },
+    {
+      "type": "stat",
+      "title": "vCPU in use",
+      "description": "Allocatable cores across nodes. Two per Standard_B2s_v2, against a hard regional quota of four.",
+      "gridPos": { "h": 4, "w": 5, "x": 5, "y": 0 },
+      "targets": [ { "expr": "sum(kube_node_status_allocatable{resource=\"cpu\"})", "refId": "A" } ],
+      "fieldConfig": {
+        "defaults": {
+          "max": 4,
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "red", "value": 4 }
+          ] }
+        }
+      },
+      "options": { "colorMode": "background", "graphMode": "none" }
+    },
+    {
+      "type": "gauge",
+      "title": "CPU requested",
+      "description": "Requests, not usage. This is what the scheduler uses to decide whether anything else fits — a pod stays Pending on requests even if actual usage is near zero.",
+      "gridPos": { "h": 8, "w": 7, "x": 10, "y": 0 },
+      "targets": [
+        { "expr": "100 * sum(kube_pod_container_resource_requests{resource=\"cpu\"}) / sum(kube_node_status_allocatable{resource=\"cpu\"})", "refId": "A" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent", "min": 0, "max": 100,
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "orange", "value": 75 },
+            { "color": "red", "value": 90 }
+          ] }
+        }
+      }
+    },
+    {
+      "type": "gauge",
+      "title": "Memory requested",
+      "gridPos": { "h": 8, "w": 7, "x": 17, "y": 0 },
+      "targets": [
+        { "expr": "100 * sum(kube_pod_container_resource_requests{resource=\"memory\"}) / sum(kube_node_status_allocatable{resource=\"memory\"})", "refId": "A" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent", "min": 0, "max": 100,
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "orange", "value": 75 },
+            { "color": "red", "value": 90 }
+          ] }
+        }
+      }
+    },
+    {
+      "type": "stat",
+      "title": "Persistent volumes",
+      "description": "Each is a managed disk billed whether or not the pod using it is running — one of the few costs `make stop` does not remove.",
+      "gridPos": { "h": 4, "w": 10, "x": 0, "y": 4 },
+      "targets": [ { "expr": "count(kube_persistentvolumeclaim_info)", "refId": "A" } ],
+      "fieldConfig": { "defaults": { "thresholds": { "mode": "absolute", "steps": [ { "color": "blue", "value": null } ] } } },
+      "options": { "colorMode": "value", "graphMode": "none" }
+    },
+
+    {
+      "type": "timeseries",
+      "title": "CPU usage by namespace",
+      "description": "Actual usage, against requests above. A large gap means the platform is over-requesting and could fit more work in the same quota.",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "targets": [
+        { "expr": "sum by (namespace) (rate(container_cpu_usage_seconds_total{namespace=~\"airflow|monitoring|kube-system\",container!=\"\"}[5m]))", "legendFormat": "{{namespace}}", "refId": "A" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "none", "custom": { "fillOpacity": 20, "stacking": { "mode": "normal" } } } }
+    },
+    {
+      "type": "timeseries",
+      "title": "Memory working set by namespace",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "targets": [
+        { "expr": "sum by (namespace) (container_memory_working_set_bytes{namespace=~\"airflow|monitoring|kube-system\",container!=\"\"})", "legendFormat": "{{namespace}}", "refId": "A" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "bytes", "custom": { "fillOpacity": 20, "stacking": { "mode": "normal" } } } }
+    },
+
+    {
+      "type": "timeseries",
+      "title": "Node disk and PVC usage",
+      "description": "Prometheus retains 7 days and Postgres holds Airflow's metadata. A filling PVC is a slow failure — it does not alert until something cannot write.",
+      "gridPos": { "h": 7, "w": 24, "x": 0, "y": 16 },
+      "targets": [
+        { "expr": "100 - (100 * node_filesystem_avail_bytes{mountpoint=\"/\",fstype!=\"tmpfs\"} / node_filesystem_size_bytes{mountpoint=\"/\",fstype!=\"tmpfs\"})", "legendFormat": "node root", "refId": "A" },
+        { "expr": "100 * kubelet_volume_stats_used_bytes / kubelet_volume_stats_capacity_bytes", "legendFormat": "{{persistentvolumeclaim}}", "refId": "B" }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent", "max": 100,
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "orange", "value": 75 },
+            { "color": "red", "value": 90 }
+          ] },
+          "custom": { "fillOpacity": 5, "lineWidth": 2 }
+        }
+      }
+    }
+  ]
+}

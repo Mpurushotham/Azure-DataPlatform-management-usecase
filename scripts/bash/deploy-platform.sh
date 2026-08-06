@@ -161,6 +161,33 @@ helm upgrade --install kps prometheus-community/kube-prometheus-stack \
   --values kubernetes/monitoring/values-sandbox.yaml \
   --wait --timeout 15m
 
+# ── 4b. Airflow scrape target and dashboards ─────────────────────────────────
+# The ServiceMonitor is not optional decoration. Airflow's statsd exporter was
+# running and exposing ~200 series the whole time, and Prometheus held none of
+# them because nothing told it to scrape — so every `airflow_*` panel would have
+# been permanently empty and looked like a broken pipeline rather than a missing
+# target.
+#
+# Applied before Airflow so the target exists as soon as the pods do.
+echo
+echo "==> Airflow scrape target"
+kubectl apply -f kubernetes/monitoring/servicemonitor-airflow.yaml
+
+# Dashboards as ConfigMaps, loaded by the Grafana sidecar. Created from the JSON
+# rather than embedded in YAML so they stay readable and diffable — a dashboard
+# is code here, and one edited in the Grafana UI is lost on the next pod restart
+# by design.
+echo "==> Grafana dashboards"
+for f in kubernetes/monitoring/dashboards/*.json; do
+  name="grafana-dash-$(basename "$f" .json)"
+  kubectl create configmap "$name" -n monitoring \
+    --from-file="$(basename "$f")=$f" --dry-run=client -o yaml \
+    | kubectl label --local -f - grafana_dashboard=1 -o yaml \
+    | kubectl annotate --local -f - grafana_folder=YODA -o yaml \
+    | kubectl apply -f - >/dev/null
+  echo "    $(basename "$f" .json)"
+done
+
 # ── 5. Airflow ───────────────────────────────────────────────────────────────
 echo
 echo "==> Airflow"
@@ -225,7 +252,7 @@ Deployed.
                            -o jsonpath='{.data.password}' | base64 -d
 
   Grafana       kubectl port-forward -n monitoring svc/kps-grafana 3000:80
-                http://localhost:3000
+                http://localhost:3000 -> Dashboards -> YODA
                 user     admin
                 password kubectl get secret grafana-admin -n monitoring \\
                            -o jsonpath='{.data.admin-password}' | base64 -d

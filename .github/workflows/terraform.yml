@@ -203,7 +203,11 @@ jobs:
           make plan ENV=sandbox 2>&1 | tee plan.txt
           {
             echo 'summary<<PLANEOF'
-            grep -E '^(Plan:|No changes)' plan.txt || echo 'Plan produced no summary line'
+            # Strip ANSI first: `make plan` colourises, so the summary line
+            # starts with escape codes and an anchored grep never matches it.
+            sed 's/\x1b\[[0-9;]*m//g' plan.txt \
+              | grep -E '^(Plan:|No changes|Error:)' \
+              || echo 'Plan produced no summary line'
             echo 'PLANEOF'
           } >> "$GITHUB_OUTPUT"
 

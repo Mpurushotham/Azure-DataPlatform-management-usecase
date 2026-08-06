@@ -230,6 +230,10 @@ quota: ## Preflight: vCPU quota vs what this environment needs
 	$(call require,az)
 	@./scripts/bash/check-quota.sh $(ENV)
 
+.PHONY: scim-check
+scim-check: ## Can Unity Catalog resolve the Entra groups? Run before enabling grants
+	@./scripts/bash/setup-scim.sh --check
+
 .PHONY: drift
 drift: ## Detect Unity Catalog grant and tag drift against the declared state
 	@python3 scripts/python/uc_drift.py --env $(ENV)

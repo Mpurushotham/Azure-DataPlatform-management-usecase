@@ -149,28 +149,63 @@ the whole platform.
 
 ## SCIM provisioning {#scim-provisioning}
 
-**Symptom.** A Terraform apply of the Databricks root fails with
-`Could not find principal with name yoda-...`, or Unity Catalog grants do not
-appear even though the Entra group plainly exists.
+**Symptom.** An apply of the Databricks root fails with
+`PRINCIPAL_DOES_NOT_EXIST: Could not find principal with name yoda-...`, or
+Unity Catalog grants do not appear even though the Entra group plainly exists.
 
-**Cause.** Entra groups do not exist in Databricks until SCIM synchronises them
-into the *account*. Terraform can only name a principal Databricks already
-knows about. This is why `enable_grants` defaults to `false` — see
-[ADR-007](DECISIONS.md#adr-007).
+**Cause.** Unity Catalog grants can only name principals that exist at the
+Databricks **account** level. Entra groups do not appear there by themselves.
+This is why `enable_grants` defaults to `false` — a half-applied grant model is
+worse than none.
 
-**Fix, once per tenant.**
+**Check first, in one command:**
 
-1. `https://accounts.azuredatabricks.net` → Settings → User provisioning.
-2. Generate a SCIM token and endpoint URL.
-3. In Entra: Enterprise applications → Azure Databricks SCIM Provisioning
-   Connector → provision the five `yoda-*` groups.
-4. Wait for the first sync cycle — up to 40 minutes.
-5. Confirm the groups are visible in the Databricks account console.
-6. Set `enable_grants = true` in
-   `terraform/envs/sandbox-databricks/terraform.tfvars` and apply.
+```bash
+make scim-check
+```
 
-**Do not** work around this by granting to individual users. Every grant in this
-platform targets a group — see [ADR-012](DECISIONS.md#adr-012).
+It probes whether Unity Catalog can resolve each `yoda-*` group and needs no
+account ID — the question is answerable from the workspace, and all three
+options below succeed or fail on it identically.
+
+### Closing the gap
+
+| Option | Sync | Setup | Rotation |
+|---|---|---|---|
+| **Automatic identity management** | continuous, none to run | one account-console toggle | none |
+| Entra SCIM connector app | continuous | enterprise app + token + mappings | SCIM token |
+| Direct push (`setup-scim.sh`) | point-in-time | none | n/a |
+
+**Automatic identity management is the option in use here.** It makes every
+Entra user, group and service principal visible to Databricks with no sync job,
+no SCIM token and nothing to drift — it removes the whole category of problem
+rather than automating around it.
+
+```
+1. https://accounts.azuredatabricks.net
+2. Settings -> Identity management
+3. Automatic identity management -> ON
+```
+
+Account admin is required; the tenant Global Administrator holds it by default.
+
+**The direct push** (`./scripts/bash/setup-scim.sh`, needs
+`DATABRICKS_ACCOUNT_ID`) calls the same account SCIM API the connector calls. It
+is a legitimate bootstrap, not a workaround — but it is point-in-time, so
+membership changed in Entra afterwards is not reflected until it runs again.
+
+### Then enable grants
+
+```bash
+make scim-check                              # must pass first
+# enable_grants = true in terraform/envs/sandbox-databricks/terraform.tfvars
+make plan  ENV=sandbox-databricks
+make apply ENV=sandbox-databricks
+make drift ENV=sandbox                       # confirms nothing was granted outside Terraform
+```
+
+**Do not** work around a resolution failure by granting to individual users.
+Every grant on this platform targets a group — [ADR-012](DECISIONS.md#adr-012).
 
 ---
 

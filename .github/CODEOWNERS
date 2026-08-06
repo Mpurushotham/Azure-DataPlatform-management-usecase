@@ -1,0 +1,13 @@
+# Review ownership.
+#
+# Terraform, policy and CI changes alter what runs in Azure or what gates a
+# merge, so they get platform review by default. Documentation does not — a
+# docs-only change should not wait on the same reviewer.
+
+*                       @Mpurushotham
+
+/terraform/             @Mpurushotham
+/policies/              @Mpurushotham
+/.github/workflows/     @Mpurushotham
+/.mcp.json              @Mpurushotham
+/scripts/               @Mpurushotham

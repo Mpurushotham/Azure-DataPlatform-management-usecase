@@ -195,6 +195,10 @@ kubeconfig: ## Fetch AKS credentials for ENV
 	NAME=$$(cd $(TF_DIR) && terraform output -raw aks_cluster_name); \
 	az aks get-credentials --resource-group "$$RG" --name "$$NAME" --overwrite-existing
 
+.PHONY: ui
+ui: ## Open Airflow, Grafana and Prometheus locally (Ctrl-C to stop)
+	@./scripts/bash/port-forward.sh
+
 .PHONY: platform-deploy
 platform-deploy: ## Install the in-cluster platform (Airflow, Prometheus, Grafana)
 	$(call require,helm)

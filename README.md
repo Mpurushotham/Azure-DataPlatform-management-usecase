@@ -179,6 +179,7 @@ Detail: [docs/SECURITY.md](docs/SECURITY.md) ·
 | [FINOPS.md](docs/FINOPS.md) | Cost model, attribution, the levers that work |
 | [RUNBOOKS.md](docs/RUNBOOKS.md) | Incident response — every alert links here |
 | [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Symptom-first diagnostics: "X is broken, how do I fix it" |
+| [ACCESS.md](docs/ACCESS.md) | How to reach every UI and API, and why none is public |
 | [MCP.md](docs/MCP.md) | MCP servers configured, and why only three |
 | [CI-STANDARDS.md](docs/CI-STANDARDS.md) | What runs on a PR, action pinning policy, config-parity rule |
 | [ONBOARDING-DOMAIN.md](docs/ONBOARDING-DOMAIN.md) | Adding a data domain |

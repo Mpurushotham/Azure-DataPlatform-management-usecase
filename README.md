@@ -166,7 +166,9 @@ Detail: [docs/SECURITY.md](docs/SECURITY.md) ·
 
 | Document | Answers |
 |---|---|
+| [SOLUTION-DESIGN.md](docs/SOLUTION-DESIGN.md) | Design-authority view: context, requirements, NFRs, risks, roadmap |
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | What the platform is and how data flows |
+| [ARCHITECTURE-VISUAL.md](docs/ARCHITECTURE-VISUAL.md) | Top-to-bottom service view; links the iconographic rendering |
 | [DECISIONS.md](docs/DECISIONS.md) | Why each choice, what it cost, when to revisit |
 | [NETWORK-CIA.md](docs/NETWORK-CIA.md) | Network design against Confidentiality, Integrity, Availability |
 | [SECURITY.md](docs/SECURITY.md) | Identity, encryption, compliance control mapping |
@@ -175,6 +177,8 @@ Detail: [docs/SECURITY.md](docs/SECURITY.md) ·
 | [OBSERVABILITY.md](docs/OBSERVABILITY.md) | SLOs, dashboards, alerting philosophy |
 | [FINOPS.md](docs/FINOPS.md) | Cost model, attribution, the levers that work |
 | [RUNBOOKS.md](docs/RUNBOOKS.md) | Incident response — every alert links here |
+| [TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | Symptom-first diagnostics: "X is broken, how do I fix it" |
+| [MCP.md](docs/MCP.md) | MCP servers configured, and why only three |
 | [ONBOARDING-DOMAIN.md](docs/ONBOARDING-DOMAIN.md) | Adding a data domain |
 | [COVERAGE.md](docs/COVERAGE.md) | Requirement → artefact traceability |
 | [BUILD-LOG.md](docs/BUILD-LOG.md) | How it was built: decisions, 18 failures found by applying, what changed |
@@ -188,5 +192,9 @@ make check ENV=sandbox   # everything CI runs, in CI order
 ```
 
 `fmt-check` · `tflint` · `terraform validate` (all roots) · `trivy config`
-(CRITICAL blocks) · Databricks cluster-policy validation · Airflow DAG import
-check.
+(CRITICAL blocks) · Databricks cluster-policy contract · Airflow DAG import
+check · documentation link and ADR-anchor check.
+
+CI runs the same targets on GitHub Actions and Azure DevOps. The Azure-dependent
+stages skip cleanly until `terraform/bootstrap` has been applied and its outputs
+recorded as repository variables — the pipeline is green on first commit.

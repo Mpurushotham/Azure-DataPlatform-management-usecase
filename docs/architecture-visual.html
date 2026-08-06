@@ -1,0 +1,696 @@
+<title>YODA Data Platform — Architecture</title>
+
+<style>
+  :root {
+    --ink:        #0d1520;
+    --ink-2:      #33445a;
+    --muted:      #5f7286;
+    --paper:      #f7f9fb;
+    --surface:    #ffffff;
+    --line:       #d8e0e8;
+    --line-soft:  #e8eef3;
+
+    --azure:      #0078d4;
+
+    --l1: #1a63d8;
+    --l2: #107c41;
+    --l3: #c4501a;
+    --l4: #00707d;
+    --l5: #6b3fa0;
+    --l6: #5a6b7d;
+
+    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, Roboto, sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+
+    --maxw: 1120px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ink:       #e8eef5;
+      --ink-2:     #b3c2d1;
+      --muted:     #8798a9;
+      --paper:     #0a1119;
+      --surface:   #121c27;
+      --line:      #27354456;
+      --line-soft: #1e2b38;
+
+      --azure: #4aa5e8;
+      --l1: #6aa8f5;
+      --l2: #4cb87a;
+      --l3: #e8834f;
+      --l4: #3fb3c0;
+      --l5: #a985d8;
+      --l6: #8b9aab;
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --ink:       #e8eef5;
+    --ink-2:     #b3c2d1;
+    --muted:     #8798a9;
+    --paper:     #0a1119;
+    --surface:   #121c27;
+    --line:      #27354456;
+    --line-soft: #1e2b38;
+    --azure: #4aa5e8;
+    --l1: #6aa8f5;
+    --l2: #4cb87a;
+    --l3: #e8834f;
+    --l4: #3fb3c0;
+    --l5: #a985d8;
+    --l6: #8b9aab;
+  }
+
+  :root[data-theme="light"] {
+    --ink:       #0d1520;
+    --ink-2:     #33445a;
+    --muted:     #5f7286;
+    --paper:     #f7f9fb;
+    --surface:   #ffffff;
+    --line:      #d8e0e8;
+    --line-soft: #e8eef3;
+    --azure: #0078d4;
+    --l1: #1a63d8;
+    --l2: #107c41;
+    --l3: #c4501a;
+    --l4: #00707d;
+    --l5: #6b3fa0;
+    --l6: #5a6b7d;
+  }
+
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    max-width: var(--maxw);
+    margin: 0 auto;
+    padding: 56px 24px 96px;
+    display: flex;
+    flex-direction: column;
+    gap: 56px;
+  }
+
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--azure);
+    margin: 0 0 14px;
+  }
+
+  h1 {
+    font-size: clamp(30px, 4.6vw, 46px);
+    line-height: 1.1;
+    letter-spacing: -0.024em;
+    font-weight: 700;
+    margin: 0 0 16px;
+    text-wrap: balance;
+  }
+
+  .lede {
+    font-size: 17px;
+    color: var(--ink-2);
+    max-width: 64ch;
+    margin: 0;
+  }
+
+  h2 {
+    font-size: 21px;
+    letter-spacing: -0.012em;
+    font-weight: 650;
+    margin: 0 0 6px;
+    text-wrap: balance;
+  }
+
+  .sub {
+    color: var(--muted);
+    font-size: 14.5px;
+    max-width: 68ch;
+    margin: 0 0 22px;
+  }
+
+  section { display: flex; flex-direction: column; }
+
+  .facts {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 1px;
+    background: var(--line-soft);
+    border: 1px solid var(--line-soft);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  .fact { background: var(--surface); padding: 16px 18px; }
+  .fact dt {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 6px;
+  }
+  .fact dd {
+    margin: 0;
+    font-size: 19px;
+    font-weight: 650;
+    letter-spacing: -0.014em;
+    font-variant-numeric: tabular-nums;
+  }
+  .fact dd span { font-size: 13px; font-weight: 450; color: var(--muted); }
+
+  figure {
+    margin: 0;
+    background: var(--surface);
+    border: 1px solid var(--line-soft);
+    border-radius: 12px;
+    padding: 22px;
+    overflow-x: auto;
+  }
+  figure svg { display: block; max-width: 100%; height: auto; margin: 0 auto; }
+  figcaption {
+    margin-top: 18px;
+    padding-top: 16px;
+    border-top: 1px solid var(--line-soft);
+    font-size: 13.5px;
+    color: var(--muted);
+    max-width: 74ch;
+  }
+  figcaption strong { color: var(--ink-2); font-weight: 600; }
+
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  .tablewrap { overflow-x: auto; border: 1px solid var(--line-soft); border-radius: 10px; }
+  th, td { text-align: left; padding: 11px 16px; border-bottom: 1px solid var(--line-soft); }
+  th {
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    font-weight: 500;
+    background: var(--paper);
+  }
+  tr:last-child td { border-bottom: 0; }
+  td code, .mono {
+    font-family: var(--font-mono);
+    font-size: 12.5px;
+    color: var(--ink-2);
+  }
+
+  .swatch {
+    display: inline-block;
+    width: 9px; height: 9px;
+    border-radius: 2px;
+    margin-right: 8px;
+    vertical-align: 1px;
+  }
+
+  .note {
+    border-left: 2px solid var(--azure);
+    padding: 4px 0 4px 18px;
+    color: var(--ink-2);
+    font-size: 14.5px;
+    max-width: 72ch;
+  }
+
+  footer {
+    border-top: 1px solid var(--line-soft);
+    padding-top: 22px;
+    color: var(--muted);
+    font-size: 13px;
+    max-width: 74ch;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    figure { transition: border-color .2s ease; }
+  }
+</style>
+
+<div class="wrap">
+
+  <header>
+    <p class="eyebrow">Solution architecture &middot; Sweden Central</p>
+    <h1>YODA Data Platform</h1>
+    <p class="lede">
+      An Azure and Databricks lakehouse for analytics, AI, reporting and data products —
+      read from the consumer down to the platform foundation. Every layer below is
+      deployed and running, not proposed.
+    </p>
+  </header>
+
+  <section>
+    <dl class="facts">
+      <div class="fact"><dt>Region</dt><dd>Sweden Central</dd></div>
+      <div class="fact"><dt>Resources</dt><dd>40</dd></div>
+      <div class="fact"><dt>vCPU used</dt><dd>2 <span>/ 4 quota</span></dd></div>
+      <div class="fact"><dt>Databricks</dt><dd>2 <span>workspaces</span></dd></div>
+      <div class="fact"><dt>Run rate</dt><dd>~&euro;44 <span>/ month</span></dd></div>
+      <div class="fact"><dt>Stored secrets</dt><dd>0</dd></div>
+    </dl>
+  </section>
+
+  <section>
+    <h2>The platform, top to bottom</h2>
+    <p class="sub">
+      Six layers. The four upper bands are the data path and read downward; orchestration
+      drives processing from below, and the foundation is cross-cutting.
+    </p>
+
+    <figure>
+      <svg viewBox="0 0 1000 950" role="img"
+           aria-label="Six-layer architecture stack: consumption, governance, processing and storage form a downward data path; orchestration submits job runs upward into processing; the platform foundation of network, identity, policy and telemetry underpins every layer.">
+        <defs>
+          <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,1 L9,5 L0,9 z" fill="currentColor"/>
+          </marker>
+
+          <!-- Service glyphs: 24x24 grid, geometric, Azure visual language -->
+          <symbol id="i-report" viewBox="0 0 24 24">
+            <rect x="3" y="13" width="4" height="8" rx="1"/><rect x="10" y="8" width="4" height="13" rx="1"/><rect x="17" y="3" width="4" height="18" rx="1"/>
+          </symbol>
+          <symbol id="i-sql" viewBox="0 0 24 24">
+            <ellipse cx="12" cy="6" rx="8" ry="3"/><path d="M4 6v12c0 1.7 3.6 3 8 3s8-1.3 8-3V6"/><path d="M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/>
+          </symbol>
+          <symbol id="i-share" viewBox="0 0 24 24">
+            <circle cx="6" cy="12" r="2.6"/><circle cx="18" cy="6" r="2.6"/><circle cx="18" cy="18" r="2.6"/><path d="M8.3 10.8 15.7 7.2M8.3 13.2l7.4 3.6"/>
+          </symbol>
+          <symbol id="i-ml" viewBox="0 0 24 24">
+            <circle cx="5" cy="12" r="2.2"/><circle cx="12" cy="5" r="2.2"/><circle cx="12" cy="19" r="2.2"/><circle cx="19" cy="12" r="2.2"/><path d="M7 11 10.4 6.6M7 13l3.4 4.4M13.6 6.6 17 11M13.6 17.4 17 13"/>
+          </symbol>
+          <symbol id="i-catalog" viewBox="0 0 24 24">
+            <rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16M3 10h6M3 15h6"/><path d="M12.5 8.5h5M12.5 12h5M12.5 15.5h3"/>
+          </symbol>
+          <symbol id="i-identity" viewBox="0 0 24 24">
+            <path d="M12 3 4 6v6c0 4.4 3.3 8.2 8 9 4.7-.8 8-4.6 8-9V6z"/><circle cx="12" cy="10.5" r="2.4"/><path d="M8 17c.8-2 2.2-3 4-3s3.2 1 4 3"/>
+          </symbol>
+          <symbol id="i-lineage" viewBox="0 0 24 24">
+            <rect x="2.5" y="9.5" width="5" height="5" rx="1"/><rect x="16.5" y="3.5" width="5" height="5" rx="1"/><rect x="16.5" y="15.5" width="5" height="5" rx="1"/><path d="M7.5 12h4.5V6h4.5M12 12v6h4.5"/>
+          </symbol>
+          <symbol id="i-databricks" viewBox="0 0 24 24">
+            <path d="M3 8.5 12 4l9 4.5-9 4.5z"/><path d="M3 12.5 12 17l9-4.5"/><path d="M3 16.5 12 21l9-4.5"/>
+          </symbol>
+          <symbol id="i-policy-c" viewBox="0 0 24 24">
+            <circle cx="12" cy="12" r="3.2"/><path d="M12 2.5v3M12 18.5v3M21.5 12h-3M5.5 12h-3M18.7 5.3l-2.1 2.1M7.4 16.6l-2.1 2.1M18.7 18.7l-2.1-2.1M7.4 7.4 5.3 5.3"/>
+          </symbol>
+          <symbol id="i-storage" viewBox="0 0 24 24">
+            <path d="M12 2.5 21 7v10l-9 4.5L3 17V7z"/><path d="M3 7l9 4.5L21 7M12 11.5V21.5"/>
+          </symbol>
+          <symbol id="i-medallion" viewBox="0 0 24 24">
+            <path d="M12 3 21 7.5 12 12 3 7.5z"/><path d="M3 12 12 16.5 21 12"/><path d="M3 16.5 12 21l9-4.5"/>
+          </symbol>
+          <symbol id="i-quarantine" viewBox="0 0 24 24">
+            <path d="M12 3 21 19H3z"/><path d="M12 9.5v4.5M12 16.8v.2"/>
+          </symbol>
+          <symbol id="i-aks" viewBox="0 0 24 24">
+            <path d="M12 2.6 20.5 7v10L12 21.4 3.5 17V7z"/><circle cx="12" cy="12" r="2.4"/><path d="M12 4.8v4.8M12 14.4v4.8M6.2 8.8l4.1 2.4M13.7 12.8l4.1 2.4M17.8 8.8l-4.1 2.4M10.3 12.8l-4.1 2.4"/>
+          </symbol>
+          <symbol id="i-airflow" viewBox="0 0 24 24">
+            <circle cx="12" cy="12" r="2.2"/><path d="M12 9.8c0-4 1.5-6.5 4.5-7.3M14.2 12c4 0 6.5 1.5 7.3 4.5M12 14.2c0 4-1.5 6.5-4.5 7.3M9.8 12c-4 0-6.5-1.5-7.3-4.5"/>
+          </symbol>
+          <symbol id="i-grafana" viewBox="0 0 24 24">
+            <path d="M3 20h18"/><path d="M3 16.5l4.5-5 3.5 3 4-6.5 5.5 5"/><circle cx="7.5" cy="11.5" r="1.4"/><circle cx="15" cy="8" r="1.4"/>
+          </symbol>
+          <symbol id="i-registry" viewBox="0 0 24 24">
+            <rect x="3" y="8" width="18" height="12" rx="1.6"/><path d="M3 12h18"/><rect x="7" y="3.5" width="10" height="4.5" rx="1.2"/><path d="M9.5 16h5"/>
+          </symbol>
+          <symbol id="i-network" viewBox="0 0 24 24">
+            <circle cx="12" cy="12" r="3"/><circle cx="4.5" cy="5" r="2.2"/><circle cx="19.5" cy="5" r="2.2"/><circle cx="4.5" cy="19" r="2.2"/><circle cx="19.5" cy="19" r="2.2"/><path d="M6.3 6.6 9.8 10M17.7 6.6 14.2 10M6.3 17.4 9.8 14M17.7 17.4 14.2 14"/>
+          </symbol>
+          <symbol id="i-vault" viewBox="0 0 24 24">
+            <rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/><circle cx="12" cy="15.5" r="1.6"/>
+          </symbol>
+          <symbol id="i-policy" viewBox="0 0 24 24">
+            <path d="M12 2.5 4.5 5.5v6.8c0 4.3 3.1 8.1 7.5 9.2 4.4-1.1 7.5-4.9 7.5-9.2V5.5z"/><path d="M8.6 12.2l2.5 2.5 4.3-4.7"/>
+          </symbol>
+          <symbol id="i-monitor" viewBox="0 0 24 24">
+            <rect x="2.5" y="4.5" width="19" height="14" rx="2"/><path d="M6 12h3l2-3.5 2.6 7 2-3.5h2.4"/>
+          </symbol>
+          <symbol id="i-cost" viewBox="0 0 24 24">
+            <circle cx="12" cy="12" r="9"/><path d="M12 7v10M14.6 9.2c-.7-.8-1.7-1.2-2.6-1.2-1.5 0-2.7.9-2.7 2.1s1.2 1.8 2.7 2.1 2.7.9 2.7 2.1-1.2 2.1-2.7 2.1c-1 0-2-.4-2.6-1.2"/>
+          </symbol>
+        </defs>
+
+        <g fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+
+          <!-- ================= BAND 1 · CONSUMPTION ================= -->
+          <g>
+            <rect x="46" y="20" width="938" height="108" rx="10" stroke="var(--line)" stroke-width="1"/>
+            <path d="M50 20h-0.5a4 4 0 0 0-4 4v100a4 4 0 0 0 4 4H50z" fill="var(--l1)" stroke="none"/>
+            <rect x="46" y="20" width="4" height="108" fill="var(--l1)" stroke="none"/>
+            <text x="72" y="46" font-family="var(--font-mono)" font-size="11" fill="var(--l1)" stroke="none" letter-spacing="1.4">01</text>
+            <text x="72" y="70" font-size="15" font-weight="650" fill="var(--ink)" stroke="none">Consumption</text>
+            <text x="72" y="90" font-size="11.5" fill="var(--muted)" stroke="none">Who reads the</text>
+            <text x="72" y="105" font-size="11.5" fill="var(--muted)" stroke="none">platform</text>
+
+            <g stroke="var(--l1)">
+              <use href="#i-report" x="272" y="46" width="26" height="26"/>
+              <use href="#i-sql" x="452" y="46" width="26" height="26"/>
+              <use href="#i-share" x="632" y="46" width="26" height="26"/>
+              <use href="#i-ml" x="812" y="46" width="26" height="26"/>
+            </g>
+            <g fill="var(--ink-2)" stroke="none" font-size="11.5" text-anchor="middle">
+              <text x="285" y="90">Power BI</text><text x="285" y="105" fill="var(--muted)" font-size="10.5">reporting</text>
+              <text x="465" y="90">Databricks SQL</text><text x="465" y="105" fill="var(--muted)" font-size="10.5">serverless warehouse</text>
+              <text x="645" y="90">Delta Sharing</text><text x="645" y="105" fill="var(--muted)" font-size="10.5">data products</text>
+              <text x="825" y="90">ML / AI</text><text x="825" y="105" fill="var(--muted)" font-size="10.5">notebooks, serving</text>
+            </g>
+          </g>
+
+          <path d="M515 132 L515 158" stroke="var(--azure)" marker-end="url(#ar)" color="var(--azure)"/>
+          <text x="527" y="150" font-size="10.5" font-family="var(--font-mono)" fill="var(--muted)" stroke="none">every query authorised by</text>
+
+          <!-- ================= BAND 2 · GOVERNANCE ================= -->
+          <g>
+            <rect x="46" y="162" width="938" height="108" rx="10" stroke="var(--line)" stroke-width="1"/>
+            <rect x="46" y="162" width="4" height="108" fill="var(--l2)" stroke="none"/>
+            <text x="72" y="188" font-family="var(--font-mono)" font-size="11" fill="var(--l2)" stroke="none" letter-spacing="1.4">02</text>
+            <text x="72" y="212" font-size="15" font-weight="650" fill="var(--ink)" stroke="none">Governance</text>
+            <text x="72" y="232" font-size="11.5" fill="var(--muted)" stroke="none">The single</text>
+            <text x="72" y="247" font-size="11.5" fill="var(--muted)" stroke="none">authorisation point</text>
+
+            <g stroke="var(--l2)">
+              <use href="#i-catalog" x="302" y="188" width="26" height="26"/>
+              <use href="#i-identity" x="542" y="188" width="26" height="26"/>
+              <use href="#i-lineage" x="782" y="188" width="26" height="26"/>
+            </g>
+            <g fill="var(--ink-2)" stroke="none" font-size="11.5" text-anchor="middle">
+              <text x="315" y="232">Unity Catalog</text><text x="315" y="247" fill="var(--muted)" font-size="10.5">metastore &middot; 2 catalogs</text>
+              <text x="555" y="232">Microsoft Entra ID</text><text x="555" y="247" fill="var(--muted)" font-size="10.5">5 groups &middot; workload identity</text>
+              <text x="795" y="232">Grants &amp; lineage</text><text x="795" y="247" fill="var(--muted)" font-size="10.5">audited to Log Analytics</text>
+            </g>
+          </g>
+
+          <path d="M515 274 L515 300" stroke="var(--azure)" marker-end="url(#ar)" color="var(--azure)"/>
+          <text x="527" y="292" font-size="10.5" font-family="var(--font-mono)" fill="var(--muted)" stroke="none">grants evaluated per query</text>
+
+          <!-- ================= BAND 3 · PROCESSING ================= -->
+          <g>
+            <rect x="46" y="304" width="938" height="108" rx="10" stroke="var(--line)" stroke-width="1"/>
+            <rect x="46" y="304" width="4" height="108" fill="var(--l3)" stroke="none"/>
+            <text x="72" y="330" font-family="var(--font-mono)" font-size="11" fill="var(--l3)" stroke="none" letter-spacing="1.4">03</text>
+            <text x="72" y="354" font-size="15" font-weight="650" fill="var(--ink)" stroke="none">Processing</text>
+            <text x="72" y="374" font-size="11.5" fill="var(--muted)" stroke="none">One workspace</text>
+            <text x="72" y="389" font-size="11.5" fill="var(--muted)" stroke="none">per data domain</text>
+
+            <g stroke="var(--l3)">
+              <use href="#i-databricks" x="302" y="330" width="26" height="26"/>
+              <use href="#i-databricks" x="542" y="330" width="26" height="26"/>
+              <use href="#i-policy-c" x="782" y="330" width="26" height="26"/>
+            </g>
+            <g fill="var(--ink-2)" stroke="none" font-size="11.5" text-anchor="middle">
+              <text x="315" y="374">Databricks &middot; central</text><text x="315" y="389" fill="var(--muted)" font-size="10.5">platform workspace</text>
+              <text x="555" y="374">Databricks &middot; logistics</text><text x="555" y="389" fill="var(--muted)" font-size="10.5">domain workspace</text>
+              <text x="795" y="374">Cluster policies</text><text x="795" y="389" fill="var(--muted)" font-size="10.5">4 &middot; serverless jobs</text>
+            </g>
+          </g>
+
+          <path d="M515 416 L515 442" stroke="var(--azure)" marker-end="url(#ar)" color="var(--azure)"/>
+          <text x="527" y="434" font-size="10.5" font-family="var(--font-mono)" fill="var(--muted)" stroke="none">reads / writes Delta</text>
+
+          <!-- ================= BAND 4 · STORAGE ================= -->
+          <g>
+            <rect x="46" y="446" width="938" height="108" rx="10" stroke="var(--line)" stroke-width="1"/>
+            <rect x="46" y="446" width="4" height="108" fill="var(--l4)" stroke="none"/>
+            <text x="72" y="472" font-family="var(--font-mono)" font-size="11" fill="var(--l4)" stroke="none" letter-spacing="1.4">04</text>
+            <text x="72" y="496" font-size="15" font-weight="650" fill="var(--ink)" stroke="none">Storage</text>
+            <text x="72" y="516" font-size="11.5" fill="var(--muted)" stroke="none">Entra-only access,</text>
+            <text x="72" y="531" font-size="11.5" fill="var(--muted)" stroke="none">no shared keys</text>
+
+            <g stroke="var(--l4)">
+              <use href="#i-storage" x="302" y="472" width="26" height="26"/>
+              <use href="#i-medallion" x="542" y="472" width="26" height="26"/>
+              <use href="#i-quarantine" x="782" y="472" width="26" height="26"/>
+            </g>
+            <g fill="var(--ink-2)" stroke="none" font-size="11.5" text-anchor="middle">
+              <text x="315" y="516">ADLS Gen2</text><text x="315" y="531" fill="var(--muted)" font-size="10.5">hierarchical namespace</text>
+              <text x="555" y="516">Medallion layers</text><text x="555" y="531" fill="var(--muted)" font-size="10.5">bronze &rarr; silver &rarr; gold</text>
+              <text x="795" y="516">Quarantine</text><text x="795" y="531" fill="var(--muted)" font-size="10.5">failed quality gate</text>
+            </g>
+          </g>
+
+          <!-- Orchestration drives processing: upward arrow on the right -->
+          <path d="M944 592 L944 400 L900 400" stroke="var(--l5)" stroke-dasharray="5 4"
+                marker-end="url(#ar)" color="var(--l5)"/>
+          <text x="836" y="392" font-size="10.5" font-family="var(--font-mono)" fill="var(--l5)" stroke="none" text-anchor="end">submits job runs</text>
+
+          <!-- ================= BAND 5 · ORCHESTRATION ================= -->
+          <g>
+            <rect x="46" y="588" width="938" height="108" rx="10" stroke="var(--line)" stroke-width="1"/>
+            <rect x="46" y="588" width="4" height="108" fill="var(--l5)" stroke="none"/>
+            <text x="72" y="614" font-family="var(--font-mono)" font-size="11" fill="var(--l5)" stroke="none" letter-spacing="1.4">05</text>
+            <text x="72" y="638" font-size="15" font-weight="650" fill="var(--ink)" stroke="none">Orchestration</text>
+            <text x="72" y="658" font-size="11.5" fill="var(--muted)" stroke="none">Schedules work;</text>
+            <text x="72" y="673" font-size="11.5" fill="var(--muted)" stroke="none">never processes data</text>
+
+            <g stroke="var(--l5)">
+              <use href="#i-aks" x="272" y="614" width="26" height="26"/>
+              <use href="#i-airflow" x="452" y="614" width="26" height="26"/>
+              <use href="#i-grafana" x="632" y="614" width="26" height="26"/>
+              <use href="#i-registry" x="812" y="614" width="26" height="26"/>
+            </g>
+            <g fill="var(--ink-2)" stroke="none" font-size="11.5" text-anchor="middle">
+              <text x="285" y="658">AKS 1.34</text><text x="285" y="673" fill="var(--muted)" font-size="10.5">Free tier &middot; 1 node</text>
+              <text x="465" y="658">Apache Airflow</text><text x="465" y="673" fill="var(--muted)" font-size="10.5">KubernetesExecutor</text>
+              <text x="645" y="658">Prometheus + Grafana</text><text x="645" y="673" fill="var(--muted)" font-size="10.5">in-cluster, OSS</text>
+              <text x="825" y="658">Container Registry</text><text x="825" y="673" fill="var(--muted)" font-size="10.5">Airflow image, by digest</text>
+            </g>
+          </g>
+
+          <!-- ================= BAND 6 · FOUNDATION ================= -->
+          <g>
+            <rect x="46" y="730" width="938" height="116" rx="10" stroke="var(--line)" stroke-width="1"
+                  stroke-dasharray="6 4"/>
+            <rect x="46" y="730" width="4" height="116" fill="var(--l6)" stroke="none"/>
+            <text x="72" y="756" font-family="var(--font-mono)" font-size="11" fill="var(--l6)" stroke="none" letter-spacing="1.4">06</text>
+            <text x="72" y="780" font-size="15" font-weight="650" fill="var(--ink)" stroke="none">Foundation</text>
+            <text x="72" y="800" font-size="11.5" fill="var(--muted)" stroke="none">Cross-cutting;</text>
+            <text x="72" y="815" font-size="11.5" fill="var(--muted)" stroke="none">underpins every layer</text>
+
+            <g stroke="var(--l6)">
+              <use href="#i-network" x="272" y="756" width="26" height="26"/>
+              <use href="#i-vault" x="424" y="756" width="26" height="26"/>
+              <use href="#i-policy" x="576" y="756" width="26" height="26"/>
+              <use href="#i-monitor" x="728" y="756" width="26" height="26"/>
+              <use href="#i-cost" x="880" y="756" width="26" height="26"/>
+            </g>
+            <g fill="var(--ink-2)" stroke="none" font-size="11.5" text-anchor="middle">
+              <text x="285" y="800">Virtual Network</text><text x="285" y="815" fill="var(--muted)" font-size="10.5">10.60.0.0/16 &middot; NSGs</text>
+              <text x="437" y="800">Key Vault</text><text x="437" y="815" fill="var(--muted)" font-size="10.5">RBAC-authorised</text>
+              <text x="589" y="800">Azure Policy</text><text x="589" y="815" fill="var(--muted)" font-size="10.5">enforcing baseline</text>
+              <text x="741" y="800">Log Analytics</text><text x="741" y="815" fill="var(--muted)" font-size="10.5">audit &middot; 1 GB/day cap</text>
+              <text x="893" y="800">Cost Management</text><text x="893" y="815" fill="var(--muted)" font-size="10.5">budget + forecast</text>
+            </g>
+          </g>
+
+          <!-- Foundation spine: cross-cutting up the left -->
+          <path d="M26 800 L26 74" stroke="var(--l6)" stroke-dasharray="5 5"
+                marker-end="url(#ar)" color="var(--l6)"/>
+          <path d="M26 800 L46 800M26 660 L46 660M26 500 L46 500M26 358 L46 358M26 216 L46 216M26 74 L46 74"
+                stroke="var(--l6)" stroke-dasharray="3 3" opacity="0.5"/>
+
+          <text x="500" y="900" font-size="11.5" fill="var(--muted)" stroke="none" text-anchor="middle">
+            Airflow orchestrates &middot; Databricks computes &middot; Unity Catalog authorises &mdash; no component does two of those jobs.
+          </text>
+          <text x="500" y="924" font-size="11" fill="var(--muted)" stroke="none" text-anchor="middle" font-family="var(--font-mono)">
+            2 of 4 vCPU consumed &mdash; Databricks serverless runs outside this subscription's quota
+          </text>
+        </g>
+      </svg>
+
+      <figcaption>
+        <strong>The load-bearing separation.</strong> Consumption, governance, processing and
+        storage form the data path and read downward. Orchestration sits below yet drives
+        processing — it submits job runs and waits, never touching data itself, which is why
+        the whole orchestration layer fits on a single 2&nbsp;vCPU node. The foundation is drawn
+        dashed because it is cross-cutting rather than sequential.
+      </figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>Nothing holds a key</h2>
+    <p class="sub">
+      The trust chain from a person or a pod through to bytes on disk. Every hop is a
+      federated or managed identity; no step presents a stored secret.
+    </p>
+
+    <figure>
+      <svg viewBox="0 0 1000 400" role="img"
+           aria-label="Identity trust chain: users reach data only through Entra groups and Unity Catalog grants; CI and workloads use federated identities; only the Databricks Access Connector managed identity holds a storage role.">
+        <defs>
+          <marker id="ar2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,1 L9,5 L0,9 z" fill="currentColor"/>
+          </marker>
+        </defs>
+        <g fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+
+          <text x="30" y="30" font-family="var(--font-mono)" font-size="10.5" fill="var(--muted)" stroke="none" letter-spacing="1.2">PRINCIPALS</text>
+
+          <rect x="30" y="48" width="180" height="52" rx="8" stroke="var(--line)"/>
+          <text x="46" y="72" font-size="13" fill="var(--ink)" stroke="none">Person</text>
+          <text x="46" y="89" font-size="10.5" fill="var(--muted)" stroke="none">analyst, engineer</text>
+
+          <rect x="30" y="120" width="180" height="52" rx="8" stroke="var(--line)"/>
+          <text x="46" y="144" font-size="13" fill="var(--ink)" stroke="none">GitHub / Azure DevOps</text>
+          <text x="46" y="161" font-size="10.5" fill="var(--muted)" stroke="none">CI pipeline</text>
+
+          <rect x="30" y="192" width="180" height="52" rx="8" stroke="var(--line)"/>
+          <text x="46" y="216" font-size="13" fill="var(--ink)" stroke="none">Airflow pod</text>
+          <text x="46" y="233" font-size="10.5" fill="var(--muted)" stroke="none">ServiceAccount: airflow</text>
+
+          <rect x="30" y="264" width="180" height="52" rx="8" stroke="var(--line)"/>
+          <text x="46" y="288" font-size="13" fill="var(--ink)" stroke="none">Databricks</text>
+          <text x="46" y="305" font-size="10.5" fill="var(--muted)" stroke="none">Unity Catalog</text>
+
+          <text x="300" y="30" font-family="var(--font-mono)" font-size="10.5" fill="var(--muted)" stroke="none" letter-spacing="1.2">IDENTITY</text>
+
+          <rect x="300" y="48" width="210" height="52" rx="8" stroke="var(--l2)"/>
+          <text x="316" y="72" font-size="13" fill="var(--ink)" stroke="none">Entra security group</text>
+          <text x="316" y="89" font-size="10.5" fill="var(--muted)" stroke="none" font-family="var(--font-mono)">yoda-domain-*-readers</text>
+
+          <rect x="300" y="120" width="210" height="52" rx="8" stroke="var(--l2)"/>
+          <text x="316" y="144" font-size="13" fill="var(--ink)" stroke="none">OIDC federation</text>
+          <text x="316" y="161" font-size="10.5" fill="var(--muted)" stroke="none" font-family="var(--font-mono)">id-yoda-terraform</text>
+
+          <rect x="300" y="192" width="210" height="52" rx="8" stroke="var(--l2)"/>
+          <text x="316" y="216" font-size="13" fill="var(--ink)" stroke="none">Workload identity</text>
+          <text x="316" y="233" font-size="10.5" fill="var(--muted)" stroke="none" font-family="var(--font-mono)">projected SA token</text>
+
+          <rect x="300" y="264" width="210" height="52" rx="8" stroke="var(--l2)"/>
+          <text x="316" y="288" font-size="13" fill="var(--ink)" stroke="none">Access Connector</text>
+          <text x="316" y="305" font-size="10.5" fill="var(--muted)" stroke="none" font-family="var(--font-mono)">system-assigned MI</text>
+
+          <text x="600" y="30" font-family="var(--font-mono)" font-size="10.5" fill="var(--muted)" stroke="none" letter-spacing="1.2">AUTHORISATION</text>
+
+          <rect x="600" y="48" width="180" height="124" rx="8" stroke="var(--l2)" stroke-width="1.8"/>
+          <text x="616" y="76" font-size="13" fill="var(--ink)" stroke="none">Unity Catalog</text>
+          <text x="616" y="94" font-size="10.5" fill="var(--muted)" stroke="none">grant &rarr; group</text>
+          <text x="616" y="112" font-size="10.5" fill="var(--muted)" stroke="none">never &rarr; user</text>
+          <text x="616" y="136" font-size="10.5" fill="var(--muted)" stroke="none">readers see gold</text>
+          <text x="616" y="154" font-size="10.5" fill="var(--muted)" stroke="none">only; every read logged</text>
+
+          <rect x="600" y="264" width="180" height="52" rx="8" stroke="var(--l4)"/>
+          <text x="616" y="288" font-size="13" fill="var(--ink)" stroke="none">Storage RBAC</text>
+          <text x="616" y="305" font-size="10.5" fill="var(--muted)" stroke="none">Blob Data Contributor</text>
+
+          <rect x="850" y="140" width="120" height="90" rx="8" stroke="var(--l4)" stroke-width="1.8"/>
+          <text x="910" y="180" font-size="13" fill="var(--ink)" stroke="none" text-anchor="middle">ADLS Gen2</text>
+          <text x="910" y="198" font-size="10.5" fill="var(--muted)" stroke="none" text-anchor="middle">shared keys</text>
+          <text x="910" y="213" font-size="10.5" fill="var(--muted)" stroke="none" text-anchor="middle">disabled</text>
+
+          <g color="var(--muted)">
+            <path d="M210 74 L296 74" marker-end="url(#ar2)"/>
+            <path d="M210 146 L296 146" marker-end="url(#ar2)"/>
+            <path d="M210 218 L296 218" marker-end="url(#ar2)"/>
+            <path d="M210 290 L296 290" marker-end="url(#ar2)"/>
+          </g>
+
+          <g color="var(--l2)" stroke="var(--l2)">
+            <path d="M510 74 L596 74" marker-end="url(#ar2)"/>
+            <path d="M510 146 L560 146 L560 120 L596 120" marker-end="url(#ar2)"/>
+            <path d="M510 218 L560 218 L560 160 L596 160" marker-end="url(#ar2)"/>
+          </g>
+          <path d="M510 290 L596 290" stroke="var(--l4)" marker-end="url(#ar2)" color="var(--l4)"/>
+
+          <path d="M780 110 L820 110 L820 170 L846 170" stroke="var(--l2)" marker-end="url(#ar2)" color="var(--l2)"/>
+          <text x="800" y="100" font-size="10" font-family="var(--font-mono)" fill="var(--l2)" stroke="none" text-anchor="middle">authorises</text>
+
+          <path d="M780 290 L820 290 L820 218 L846 218" stroke="var(--l4)" marker-end="url(#ar2)" color="var(--l4)"/>
+          <text x="806" y="308" font-size="10" font-family="var(--font-mono)" fill="var(--l4)" stroke="none" text-anchor="middle">reads bytes</text>
+
+          <path d="M120 100 L120 356 L900 356 L900 236" stroke="#c5221f" stroke-dasharray="5 4" opacity="0.75"/>
+          <text x="510" y="376" font-size="11" font-family="var(--font-mono)" fill="#c5221f" stroke="none" text-anchor="middle" opacity="0.9">
+            no person ever holds a storage role &mdash; this path does not exist
+          </text>
+          <path d="M494 356 L526 356" stroke="#c5221f" stroke-width="3"/>
+          <path d="M500 348 L520 364M520 348 L500 364" stroke="#c5221f" stroke-width="2"/>
+        </g>
+      </svg>
+
+      <figcaption>
+        <strong>One authorisation point, and the path that is deliberately absent.</strong>
+        Only the Access Connector managed identity holds a storage role; people reach data
+        exclusively through a Unity Catalog grant made to an Entra group. The crossed red
+        path is the shortcut that most platforms leave open — a human with
+        <span class="mono">Storage Blob Data Reader</span> could read the underlying Parquet
+        directly and bypass every column mask and row filter that makes <span class="mono">gold</span>
+        safe to publish.
+      </figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <h2>Layer reference</h2>
+    <p class="sub">What each layer is, in deployed resources rather than product names.</p>
+    <div class="tablewrap">
+      <table>
+        <thead>
+          <tr><th>Layer</th><th>Azure service</th><th>Deployed</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><span class="swatch" style="background:var(--l1)"></span>Consumption</td>
+            <td>Databricks SQL, Delta Sharing</td>
+            <td><code>2 serverless warehouses, 2X-Small, 10-min auto-stop</code></td>
+          </tr>
+          <tr>
+            <td><span class="swatch" style="background:var(--l2)"></span>Governance</td>
+            <td>Unity Catalog, Microsoft Entra ID</td>
+            <td><code>metastore_azure_swedencentral, 2 catalogs, 5 groups</code></td>
+          </tr>
+          <tr>
+            <td><span class="swatch" style="background:var(--l3)"></span>Processing</td>
+            <td>Azure Databricks Premium</td>
+            <td><code>2 VNet-injected workspaces, SCC, 4 cluster policies</code></td>
+          </tr>
+          <tr>
+            <td><span class="swatch" style="background:var(--l4)"></span>Storage</td>
+            <td>ADLS Gen2</td>
+            <td><code>HNS, 7 containers, last-access lifecycle tiering</code></td>
+          </tr>
+          <tr>
+            <td><span class="swatch" style="background:var(--l5)"></span>Orchestration</td>
+            <td>AKS, Container Registry</td>
+            <td><code>1.34 Free tier, 1&times; Standard_B2s_v2, ACR Basic</code></td>
+          </tr>
+          <tr>
+            <td><span class="swatch" style="background:var(--l6)"></span>Foundation</td>
+            <td>VNet, Key Vault, Policy, Log Analytics, Budgets</td>
+            <td><code>6 subnets, 3 NSGs, enforcing baseline, 1 GB/day cap</code></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2>What is not shown</h2>
+    <p class="note">
+      Private endpoints, NAT gateway, customer-managed keys, zone-redundant storage and
+      Defender plans exist in the <span class="mono">prod</span> Terraform root and are not
+      deployed here — a Free Trial subscription with a &euro;50 budget cannot fund them.
+      Unity Catalog grants are written but not applied, pending SCIM provisioning of the
+      Entra groups. Each gap is recorded in <span class="mono">docs/COVERAGE.md</span> rather
+      than implied away.
+    </p>
+  </section>
+
+  <footer>
+    <p>
+      <strong>Icon provenance.</strong> The glyphs above are SVG drawn for this document in
+      Azure's geometric visual language. They are <em>not</em> Microsoft's official icon
+      files and should not be represented as such. Microsoft distributes the official Azure
+      architecture icon set under terms permitting use in architecture diagrams; each glyph
+      here is a discrete <span class="mono">&lt;symbol&gt;</span> in the page source and can be
+      swapped for the official asset directly.
+    </p>
+  </footer>
+
+</div>

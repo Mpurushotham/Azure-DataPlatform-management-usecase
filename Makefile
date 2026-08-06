@@ -55,7 +55,7 @@ help: ## Show this help
 
 # ── Aggregate ────────────────────────────────────────────────────────────────
 .PHONY: check
-check: fmt-check lint validate scan policy-test dag-test ## Run every CI check locally
+check: fmt-check lint validate scan policy-test dag-test docs-test ## Run every CI check locally
 	@echo ""
 	@echo "All checks passed."
 
@@ -181,6 +181,10 @@ policy-test: ## Validate Databricks cluster policies and Azure Policy definition
 .PHONY: dag-test
 dag-test: ## Import-check every Airflow DAG (catches syntax and cycle errors)
 	@python3 scripts/python/validate_dags.py dags/
+
+.PHONY: docs-test
+docs-test: ## Verify every internal doc link and ADR anchor resolves
+	@python3 scripts/python/check_docs.py
 
 # ── Cluster ──────────────────────────────────────────────────────────────────
 .PHONY: kubeconfig

@@ -1,0 +1,38 @@
+# =============================================================================
+# Docs — internal link and structure checks
+# =============================================================================
+# The documentation is a deliverable here, not a by-product: 16 documents that
+# cross-reference each other heavily, including anchor links into DECISIONS.md
+# for every ADR cited elsewhere. A renamed heading silently breaks a dozen
+# links, and nothing else in CI would notice.
+#
+# Needs no credentials and no network.
+# =============================================================================
+
+name: docs
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '**.md'
+      - '.github/workflows/docs.yml'
+  push:
+    branches: [main]
+    paths:
+      - '**.md'
+      - '.github/workflows/docs.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  links:
+    name: links
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Check internal links and anchors
+        run: python3 scripts/python/check_docs.py

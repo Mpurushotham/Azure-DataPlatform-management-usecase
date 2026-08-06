@@ -3,13 +3,19 @@
 # =============================================================================
 # Kept in lockstep with azure-pipelines/terraform-pipeline.yml. Neither file
 # contains policy logic: both call `make` targets, so a gate can only diverge if
-# someone edits a target list, not by one pipeline quietly drifting. That is the
-# acceptance criterion behind ADR-013 — a service can move between CI platforms
-# without its security posture changing.
+# someone edits a target list, not by one pipeline quietly drifting from the
+# other. That is the acceptance criterion behind ADR-013 — a service can move
+# between CI platforms without its security posture changing.
+#
+# Runs green in a repository with no Azure configuration at all. The static
+# gates need no credentials; the Azure-dependent stages are guarded on
+# `vars.AZURE_CLIENT_ID` and skip cleanly until `terraform/bootstrap` has been
+# applied and its outputs recorded as repository variables. A pipeline that
+# fails on first commit is a pipeline nobody trusts afterwards.
 #
 # No secret is stored. Azure access is OIDC federation into the identity
-# terraform/bootstrap creates; the three repository variables below are
-# identifiers, not credentials.
+# terraform/bootstrap creates; the variables below are identifiers, not
+# credentials.
 # =============================================================================
 
 name: terraform
@@ -20,23 +26,29 @@ on:
     paths:
       - 'terraform/**'
       - 'policies/**'
+      - 'dags/**'
       - '.github/workflows/terraform.yml'
   push:
     branches: [main]
     paths:
       - 'terraform/**'
       - 'policies/**'
+      - 'dags/**'
+      - '.github/workflows/terraform.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
-  # Required to mint the OIDC token exchanged for an Azure credential.
+  # Minting the OIDC token exchanged for an Azure credential.
   id-token: write
+  # Uploading the Trivy SARIF to code scanning.
+  security-events: write
   pull-requests: write
 
 env:
   TERRAFORM_VERSION: '1.9.8'
   TFLINT_VERSION: 'v0.53.0'
+  TRIVY_VERSION: '0.58.1'
 
 concurrency:
   # One run per branch. Two concurrent applies against the same state produce a
@@ -50,9 +62,9 @@ jobs:
     name: validate
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
           terraform_wrapper: false
@@ -63,7 +75,7 @@ jobs:
       - name: Validate all roots
         run: make validate
 
-      - uses: terraform-linters/setup-tflint@v4
+      - uses: terraform-linters/setup-tflint@v6
         with:
           tflint_version: ${{ env.TFLINT_VERSION }}
 
@@ -84,24 +96,35 @@ jobs:
     name: scan
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - name: Trivy IaC scan
-        uses: aquasecurity/trivy-action@0.28.0
+      # Report HIGH and CRITICAL to code scanning. Non-blocking: a gate that
+      # blocks on HIGH in a repo this size blocks on things nobody intends to
+      # fix, and a gate people routinely override is not a gate.
+      - name: Trivy IaC scan (report)
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: config
           scan-ref: terraform/
           severity: CRITICAL,HIGH
-          # CRITICAL blocks the build; HIGH is reported. A gate that blocks on
-          # HIGH in a repo this size blocks on things nobody intends to fix,
-          # and a gate people routinely override is not a gate.
           exit-code: '0'
           format: sarif
           output: trivy.sarif
           trivyignores: .trivyignore.yaml
+        env:
+          TRIVY_SKIP_DB_UPDATE: 'false'
 
-      - name: Fail on CRITICAL
-        uses: aquasecurity/trivy-action@0.28.0
+      - name: Upload SARIF
+        uses: github/codeql-action/upload-sarif@v4
+        if: always() && hashFiles('trivy.sarif') != ''
+        with:
+          sarif_file: trivy.sarif
+          category: trivy-iac
+
+      # CRITICAL blocks the build. Every suppression in .trivyignore.yaml states
+      # what it covers, why it is acceptable, and carries an expiry date.
+      - name: Trivy IaC scan (CRITICAL gate)
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: config
           scan-ref: terraform/
@@ -109,31 +132,20 @@ jobs:
           exit-code: '1'
           trivyignores: .trivyignore.yaml
 
-      - name: Upload SARIF
-        uses: github/codeql-action/upload-sarif@v3
-        if: always()
-        with:
-          sarif_file: trivy.sarif
-
   # ── Plan against real Azure ─────────────────────────────────────────────────
-  # Runs on pull requests using the `pull_request` federated subject, which has
-  # read-only intent. A fork PR cannot select a GitHub Environment, which is
-  # what stops it reaching the apply credential.
+  # Pull requests only, using the `pull_request` federated subject, which has
+  # read intent. A fork PR cannot select a GitHub Environment, which is what
+  # stops it reaching the apply credential.
+  #
+  # Skips entirely until AZURE_CLIENT_ID is set as a repository variable.
   plan:
     name: plan
     runs-on: ubuntu-24.04
     needs: [validate, scan]
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && vars.AZURE_CLIENT_ID != ''
     environment: sandbox
-    strategy:
-      # sandbox-databricks reads sandbox's state, so a plan of it before sandbox
-      # has applied is meaningless — hence fail-fast off and ordered reporting
-      # rather than a matrix that pretends they are independent.
-      fail-fast: false
-      matrix:
-        root: [sandbox]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: azure/login@v2
         with:
@@ -141,18 +153,18 @@ jobs:
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
           terraform_wrapper: false
 
       - name: Write backend config
         run: |
-          cat > terraform/envs/${{ matrix.root }}/backend.hcl <<EOF
+          cat > terraform/envs/sandbox/backend.hcl <<EOF
           resource_group_name  = "${{ vars.TFSTATE_RESOURCE_GROUP }}"
           storage_account_name = "${{ vars.TFSTATE_STORAGE_ACCOUNT }}"
           container_name       = "tfstate-yoda-sandbox"
-          key                  = "${{ matrix.root }}.terraform.tfstate"
+          key                  = "sandbox.terraform.tfstate"
           use_azuread_auth     = true
           EOF
 
@@ -167,22 +179,32 @@ jobs:
           TF_VAR_tenant_id: ${{ vars.AZURE_TENANT_ID }}
           TF_VAR_unique_suffix: ${{ vars.UNIQUE_SUFFIX }}
         run: |
-          make init ENV=${{ matrix.root }}
-          make plan ENV=${{ matrix.root }} 2>&1 | tee plan.txt
-          echo 'summary<<EOF' >> "$GITHUB_OUTPUT"
-          grep -E '^(Plan:|No changes)' plan.txt >> "$GITHUB_OUTPUT" || echo 'Plan produced no summary line' >> "$GITHUB_OUTPUT"
-          echo 'EOF' >> "$GITHUB_OUTPUT"
+          set -o pipefail
+          make init ENV=sandbox
+          make plan ENV=sandbox 2>&1 | tee plan.txt
+          {
+            echo 'summary<<PLANEOF'
+            grep -E '^(Plan:|No changes)' plan.txt || echo 'Plan produced no summary line'
+            echo 'PLANEOF'
+          } >> "$GITHUB_OUTPUT"
 
       - name: Comment plan summary
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
+        env:
+          # Passed through the environment, not interpolated into the script
+          # body. A plan summary interpolated directly would break the template
+          # literal on any backtick or quote it contains, and is an injection
+          # path besides.
+          PLAN_SUMMARY: ${{ steps.plan.outputs.summary }}
         with:
           script: |
-            github.rest.issues.createComment({
+            const summary = process.env.PLAN_SUMMARY || 'no summary produced';
+            await github.rest.issues.createComment({
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: `### Terraform plan — \`${{ matrix.root }}\`\n\n\`\`\`\n${{ steps.plan.outputs.summary }}\n\`\`\``
-            })
+              body: ['### Terraform plan — `sandbox`', '', '```', summary, '```'].join('\n')
+            });
 
   # ── Apply ───────────────────────────────────────────────────────────────────
   # Gated on the GitHub Environment, which carries its own reviewer rules. The
@@ -193,10 +215,10 @@ jobs:
     name: apply
     runs-on: ubuntu-24.04
     needs: [validate, scan]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push' && vars.AZURE_CLIENT_ID != ''
     environment: sandbox
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - uses: azure/login@v2
         with:
@@ -204,7 +226,7 @@ jobs:
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
 
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
           terraform_wrapper: false
@@ -233,6 +255,7 @@ jobs:
           TF_VAR_tenant_id: ${{ vars.AZURE_TENANT_ID }}
           TF_VAR_unique_suffix: ${{ vars.UNIQUE_SUFFIX }}
         run: |
+          set -o pipefail
           make init  ENV=sandbox
           make plan  ENV=sandbox
           make apply ENV=sandbox

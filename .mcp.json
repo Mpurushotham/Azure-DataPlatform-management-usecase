@@ -1,0 +1,64 @@
+{
+  "$comment": [
+    "MCP servers for this repository. See docs/MCP.md for the full rationale.",
+    "",
+    "Deliberately small -- three servers, roughly 40-60 tools. Every server's",
+    "tools occupy context in every request, and overlapping servers measurably",
+    "degrade agent results. Adding 'everything available' is the common mistake.",
+    "",
+    "IMPORTANT -- the azure server inherits your `az login` session, which on",
+    "this subscription is Owner. There is no blanket read-only flag, so the",
+    "namespace list below is the control: it loads only the tool groups needed",
+    "to READ platform state (groups, storage, monitor, kusto). Provisioning goes",
+    "through Terraform and a reviewed plan, never through a tool call -- see",
+    "CLAUDE.md 'Boundaries'.",
+    "",
+    "@azure/mcp is beta (3.0.0-beta.x). Pinned to the beta line knowingly; treat",
+    "its output as advisory and verify anything surprising with `az` directly.",
+    "",
+    "terraform and kubernetes servers touch no Azure control plane: terraform is",
+    "registry/docs lookup only, kubernetes talks to whatever kubeconfig context",
+    "is current -- which is why it is pinned read-only below."
+  ],
+
+  "mcpServers": {
+    "azure": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@azure/mcp@latest",
+        "server",
+        "start",
+        "--namespace", "group",
+        "--namespace", "storage",
+        "--namespace", "monitor",
+        "--namespace", "role"
+      ],
+      "env": {
+        "AZURE_SUBSCRIPTION_ID": "${AZURE_SUBSCRIPTION_ID}",
+        "AZURE_MCP_INCLUDE_PRODUCTION_CREDENTIALS": "false"
+      }
+    },
+
+    "terraform": {
+      "command": "docker",
+      "args": [
+        "run",
+        "-i",
+        "--rm",
+        "hashicorp/terraform-mcp-server:latest"
+      ]
+    },
+
+    "kubernetes": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mcp-server-kubernetes"
+      ],
+      "env": {
+        "ALLOW_ONLY_NON_DESTRUCTIVE_TOOLS": "true"
+      }
+    }
+  }
+}

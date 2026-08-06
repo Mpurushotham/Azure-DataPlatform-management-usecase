@@ -24,16 +24,32 @@ on:
   pull_request:
     branches: [main]
     paths:
+      # Everything the gates read or execute. `scripts/**` and `Makefile` were
+      # missing, which meant a change to check-quota.sh or a validator did not
+      # trigger the workflow that runs it — the break surfaced on the next
+      # unrelated apply instead of on the pull request that caused it.
       - 'terraform/**'
       - 'policies/**'
       - 'dags/**'
+      - 'scripts/**'
+      - 'Makefile'
+      - '.tflint.hcl'
+      - '.trivyignore.yaml'
       - '.github/workflows/terraform.yml'
   push:
     branches: [main]
     paths:
+      # Everything the gates read or execute. `scripts/**` and `Makefile` were
+      # missing, which meant a change to check-quota.sh or a validator did not
+      # trigger the workflow that runs it — the break surfaced on the next
+      # unrelated apply instead of on the pull request that caused it.
       - 'terraform/**'
       - 'policies/**'
       - 'dags/**'
+      - 'scripts/**'
+      - 'Makefile'
+      - '.tflint.hcl'
+      - '.trivyignore.yaml'
       - '.github/workflows/terraform.yml'
   workflow_dispatch:
 

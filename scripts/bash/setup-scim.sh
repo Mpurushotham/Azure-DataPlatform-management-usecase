@@ -27,9 +27,11 @@
 # bootstrap and move to option 1 or 2 for anything long-lived. That trade-off
 # is recorded in docs/RUNBOOKS.md#scim-provisioning.
 #
-#   export DATABRICKS_ACCOUNT_ID=<uuid from the account console>
 #   ./scripts/bash/setup-scim.sh              # provision
 #   ./scripts/bash/setup-scim.sh --check      # report only, change nothing
+#
+# Needs no account ID and no SCIM token -- see the note above the provisioning
+# section on why the workspace proxy is used rather than accounts.azuredatabricks.net.
 # =============================================================================
 set -euo pipefail
 
@@ -105,29 +107,31 @@ EOF
   exit 0
 fi
 
-if [[ -z "${DATABRICKS_ACCOUNT_ID:-}" ]]; then
-  cat <<'EOF'
-ERROR: DATABRICKS_ACCOUNT_ID is not set.
+# ── Provisioning through the workspace proxy ─────────────────────────────────
+# A workspace proxies the account SCIM API at /api/2.0/account/scim/v2, and an
+# ordinary Azure CLI token is accepted there. That matters more than it sounds:
+#
+#   accounts.azuredatabricks.net/api/2.0/accounts/<id>/scim/v2
+#     needs the account ID, which is only visible in the account console, and
+#     rejects a token from an MSA guest identity with
+#     "Failed to retrieve tenant ID for given token"
+#
+#   <workspace>/api/2.0/account/scim/v2
+#     needs neither. Same account-level objects, reachable with the token this
+#     platform already uses everywhere else.
+#
+# So no account ID, no SCIM token, no enterprise application, and it works for
+# guest identities that cannot sign in to the account console at all.
+WORKSPACE_URL="${WORKSPACE_URL:-$(terraform -chdir=terraform/envs/sandbox output -json databricks_workspaces 2>/dev/null \
+  | jq -r '.central.url // empty')}"
 
-The Databricks account ID is not exposed by ARM, by the workspace API, or by
-the accounts API without already knowing it — it is only shown in the account
-console. Find it once:
-
-  1. https://accounts.azuredatabricks.net
-  2. Sign in with the Entra account that is a Databricks account admin
-     (the tenant Global Administrator is one by default)
-  3. The UUID is in the address bar, and under the user menu as "Account ID"
-
-  export DATABRICKS_ACCOUNT_ID=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-
-It is an identifier, not a secret, but it is not worth committing either —
-keep it in your shell profile.
-EOF
+if [[ -z "$WORKSPACE_URL" ]]; then
+  echo "ERROR: could not determine the workspace URL. Set WORKSPACE_URL, or apply terraform/envs/sandbox first."
   exit 1
 fi
 
 TOKEN=$(az account get-access-token --resource "$DATABRICKS_RESOURCE" --query accessToken -o tsv)
-SCIM="${ACCOUNT_HOST}/api/2.0/accounts/${DATABRICKS_ACCOUNT_ID}/scim/v2"
+SCIM="${WORKSPACE_URL}/api/2.0/account/scim/v2"
 
 api() {
   local method="$1" path="$2" body="${3:-}"
@@ -139,99 +143,80 @@ api() {
   fi
 }
 
-# Fail fast and clearly rather than emitting confusing errors per group.
 probe=$(curl -sS -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $TOKEN" "${SCIM}/Groups?count=1")
-case "$probe" in
-  200) : ;;
-  401|403)
-    echo "ERROR: HTTP $probe from the account SCIM API."
-    echo "The signed-in identity is not a Databricks account admin, or the account ID is wrong."
-    echo "Account admin is granted to Entra Global Administrators by default; confirm at"
-    echo "  https://accounts.azuredatabricks.net -> User management -> your user -> Roles"
-    exit 1 ;;
-  *)
-    echo "ERROR: HTTP $probe from ${SCIM}/Groups — check DATABRICKS_ACCOUNT_ID."
-    exit 1 ;;
-esac
+if [[ "$probe" != "200" ]]; then
+  echo "ERROR: HTTP $probe from ${SCIM}/Groups."
+  echo "The signed-in identity is not a Databricks account admin, or the workspace URL is wrong."
+  exit 1
+fi
 
-echo "Databricks account : $DATABRICKS_ACCOUNT_ID"
-echo "Entra groups       : ${GROUP_PREFIX}*"
-echo "Mode               : $MODE"
+echo "Workspace    : $WORKSPACE_URL"
+echo "Entra groups : ${GROUP_PREFIX}*"
 echo
 
-existing=$(api GET "/Groups?count=200" | jq -r '.Resources[]?.displayName' 2>/dev/null || true)
+first_id() { python3 -c "import json,sys;r=json.load(sys.stdin).get('Resources',[]);print(r[0]['id'] if r else '')" 2>/dev/null; }
 
-created=0 present=0 members_added=0
+# A guest is stored in Entra as user_domain#EXT#@tenant but Databricks knows it
+# by the real address. Reconstructing it needs the FIRST underscore replaced,
+# not the last -- getting that wrong creates a plausible-looking account user
+# that matches nothing.
+real_upn() {
+  case "$1" in
+    *"#EXT#"*) echo "${1%%#EXT#*}" | sed 's/_/@/' ;;
+    *) echo "$1" ;;
+  esac
+}
 
-while read -r gid gname; do
-  [[ -z "$gname" ]] && continue
+created=0 present=0 members=0
 
-  if grep -qxF "$gname" <<<"$existing"; then
-    printf '  [exists] %s\n' "$gname"
-    present=$((present + 1))
-    dbx_group_id=$(api GET "/Groups?filter=displayName+eq+%22${gname}%22" | jq -r '.Resources[0].id // empty')
-  else
-    if [[ "$MODE" == "--check" ]]; then
-      printf '  [MISSING] %s\n' "$gname"
-      continue
-    fi
-    dbx_group_id=$(api POST "/Groups" "$(jq -nc --arg n "$gname" \
+while read -r grp; do
+  [[ -z "$grp" ]] && continue
+
+  grp_id=$(api GET "/Groups?filter=displayName+eq+%22${grp}%22" | first_id)
+  if [[ -z "$grp_id" ]]; then
+    grp_id=$(api POST "/Groups" "$(jq -nc --arg n "$grp" \
       '{schemas:["urn:ietf:params:scim:schemas:core:2.0:Group"],displayName:$n}')" \
       | jq -r '.id // empty')
-    if [[ -z "$dbx_group_id" ]]; then
-      printf '  [FAILED]  %s\n' "$gname"
-      continue
-    fi
-    printf '  [created] %s\n' "$gname"
+    [[ -z "$grp_id" ]] && { printf '  [FAILED]  %s\n' "$grp"; continue; }
+    printf '  [created] %s\n' "$grp"
     created=$((created + 1))
+  else
+    printf '  [exists]  %s\n' "$grp"
+    present=$((present + 1))
   fi
 
-  [[ "$MODE" == "--check" || -z "${dbx_group_id:-}" ]] && continue
-
-  # Members are synchronised by user principal name. A user that has never
-  # signed in to Databricks is created as an account user by this call, which
-  # is what the SCIM connector would also do.
-  while read -r upn; do
-    [[ -z "$upn" ]] && continue
-    user_id=$(api GET "/Users?filter=userName+eq+%22${upn}%22" | jq -r '.Resources[0].id // empty')
+  while read -r raw; do
+    [[ -z "$raw" ]] && continue
+    upn=$(real_upn "$raw")
+    user_id=$(api GET "/Users?filter=userName+eq+%22${upn}%22" | first_id)
     if [[ -z "$user_id" ]]; then
       user_id=$(api POST "/Users" "$(jq -nc --arg u "$upn" \
         '{schemas:["urn:ietf:params:scim:schemas:core:2.0:User"],userName:$u}')" \
         | jq -r '.id // empty')
-      [[ -n "$user_id" ]] && printf '      + account user %s\n' "$upn"
+      [[ -n "$user_id" ]] && printf '      created account user %s\n' "$upn"
     fi
-    [[ -z "$user_id" ]] && continue
+    [[ -z "$user_id" ]] && { printf '      ! unresolved %s\n' "$raw"; continue; }
 
-    # PATCH add is idempotent; Databricks ignores a member already present.
-    api PATCH "/Groups/${dbx_group_id}" "$(jq -nc --arg v "$user_id" \
+    api PATCH "/Groups/${grp_id}" "$(jq -nc --arg v "$user_id" \
       '{schemas:["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
         Operations:[{op:"add",path:"members",value:[{value:$v}]}]}')" >/dev/null
-    printf '      member %s\n' "$upn"
-    members_added=$((members_added + 1))
-  done < <(az ad group member list --group "$gid" --query "[].userPrincipalName" -o tsv 2>/dev/null || true)
+    printf '      + %s\n' "$upn"
+    members=$((members + 1))
+  done < <(az ad group member list --group "$grp" --query "[].userPrincipalName" -o tsv 2>/dev/null || true)
 
 done < <(az ad group list --filter "startswith(displayName,'${GROUP_PREFIX}')" \
-           --query "[].{id:id,name:displayName}" -o tsv 2>/dev/null)
+           --query "[].displayName" -o tsv 2>/dev/null)
 
-echo
-if [[ "$MODE" == "--check" ]]; then
-  echo "Check only — nothing was changed."
-else
-  echo "Created $created group(s), $present already present, $members_added membership(s) applied."
-  cat <<'EOF'
+cat <<EOF
+
+Created $created group(s), $present already present, $members membership(s) applied.
 
 Next:
-  1. Confirm the groups are visible to Unity Catalog:
-       ./scripts/bash/setup-scim.sh --check
-  2. Turn on grants and apply:
-       enable_grants = true   in terraform/envs/sandbox-databricks/terraform.tfvars
-       make plan  ENV=sandbox-databricks
-       make apply ENV=sandbox-databricks
-  3. Verify nothing was granted outside Terraform:
-       make drift ENV=sandbox
+  ./scripts/bash/setup-scim.sh --check      confirm Unity Catalog resolves them
+  enable_grants = true                      terraform/envs/sandbox-databricks
+  make apply ENV=sandbox-databricks
+  make drift ENV=sandbox                    should report no drift
 
-This was a point-in-time push. For continuous sync, configure the Entra
-"Azure Databricks SCIM Provisioning Connector" enterprise application, or
-enable automatic identity management in the account console.
+Point-in-time. Re-run after Entra membership changes, or configure the Entra
+SCIM connector for continuous sync.
 EOF
-fi

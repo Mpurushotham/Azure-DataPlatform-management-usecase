@@ -170,11 +170,24 @@ options below succeed or fail on it identically.
 
 ### Closing the gap
 
-| Option | Sync | Setup | Rotation |
+| Option | Sync | Setup | Covers groups? |
 |---|---|---|---|
-| **Automatic identity management** | continuous, none to run | one account-console toggle | none |
-| Entra SCIM connector app | continuous | enterprise app + token + mappings | SCIM token |
-| Direct push (`setup-scim.sh`) | point-in-time | none | n/a |
+| Automatic identity management | continuous | one account-console toggle | **users only, in practice** |
+| Entra SCIM connector app | continuous | enterprise app + token + mappings | yes |
+| **Direct push (`setup-scim.sh`)** | point-in-time | none | yes |
+
+**Automatic identity management did not cover groups here.** With it enabled, a
+user created seconds earlier resolved immediately, while all five groups
+returned `totalResults: 0` indefinitely — so it resolves users on demand and
+does not surface groups. Verify with `make scim-check` rather than assuming
+either way.
+
+`setup-scim.sh` is therefore the working path, and it needs **no account ID and
+no SCIM token**: a workspace proxies the account SCIM API at
+`/api/2.0/account/scim/v2`, and an ordinary Azure CLI token is accepted there.
+That also works for guest identities that cannot sign in to the account console
+at all — which `accounts.azuredatabricks.net` rejects with *"Failed to retrieve
+tenant ID for given token"*.
 
 **Automatic identity management is the option in use here.** It makes every
 Entra user, group and service principal visible to Databricks with no sync job,

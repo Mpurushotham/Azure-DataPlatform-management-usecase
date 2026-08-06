@@ -70,6 +70,8 @@ Unity Catalog   metastore_azure_swedencentral
                 yoda_sandbox_platform    · bronze/silver/gold
                 yoda_sandbox_logistics   · bronze/silver/gold
                 4 cluster policies, 2 serverless SQL warehouses
+                grants APPLIED: readers see gold only, writers all layers
+                catalogs owned by yoda-platform-admins
 
 Entra           yoda-platform-admins · yoda-data-engineers · yoda-data-analysts
                 yoda-domain-logistics-readers · yoda-domain-logistics-writers
@@ -91,7 +93,6 @@ Listed because a coverage matrix with no gaps is not a coverage matrix.
 |---|---|---|
 | Private endpoints and private DNS off | ~EUR 7 per endpoint per month against a EUR 50 budget | One tfvar; prod already sets it |
 | `prod` never applied | No subscription with the quota or budget | An apply and a teardown |
-| Unity Catalog grants not applied | SCIM has not synchronised Entra groups into the Databricks account | Configure SCIM, set `enable_grants = true` |
 | Purview not deployed | Resource provider not registered; adds standing cost | Register provider, add module |
 | No classic Databricks compute | Would consume the entire 4 vCPU quota | Quota increase, then `enable_nat_gateway = true` |
 | Customer-managed keys | Needs a Premium Key Vault and HSM | In prod tfvars, unproven |

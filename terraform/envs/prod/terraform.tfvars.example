@@ -1,0 +1,42 @@
+# Copy to terraform.tfvars. The real file is gitignored.
+#
+# This root has never been applied — see docs/DECISIONS.md ADR-002. Read the
+# header of main.tf before you do: it needs 24 vCPU and adds roughly
+# EUR 150/month of standing cost that sandbox deliberately avoids.
+#
+# Preflight first:  ./scripts/bash/check-quota.sh prod
+
+subscription_id = "00000000-0000-0000-0000-000000000000"
+tenant_id       = "00000000-0000-0000-0000-000000000000"
+unique_suffix   = "yodaprod"
+
+# Production is reached over private endpoints and Bastion, not from a laptop.
+# These ranges should be the office or VPN egress, never a personal address.
+operator_ip_ranges = ["198.51.100.0/24"]
+
+# Append only. The network module allocates Databricks subnets by list index,
+# so reordering renumbers existing workspaces.
+domains = ["logistics", "finance"]
+
+budget_alert_emails = ["data-platform-team@example.com"]
+monthly_budget      = 4000
+budget_start_date   = "2026-09-01T00:00:00Z"
+
+# Production does not let Terraform create security groups: a pipeline that can
+# mint groups can mint itself a path to data. Create them once with the
+# directory role, then record their object IDs here.
+#   az ad group show --group yoda-platform-admins --query id -o tsv
+existing_group_ids = {
+  platform-admins          = "00000000-0000-0000-0000-000000000000"
+  data-engineers           = "00000000-0000-0000-0000-000000000000"
+  data-analysts            = "00000000-0000-0000-0000-000000000000"
+  domain-logistics-readers = "00000000-0000-0000-0000-000000000000"
+  domain-logistics-writers = "00000000-0000-0000-0000-000000000000"
+  domain-finance-readers   = "00000000-0000-0000-0000-000000000000"
+  domain-finance-writers   = "00000000-0000-0000-0000-000000000000"
+}
+
+platform_admin_object_ids = []
+
+# 24 vCPU at the autoscaler ceiling. Confirm quota before enabling.
+enable_aks = true
